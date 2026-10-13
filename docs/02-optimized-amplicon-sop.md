@@ -105,6 +105,17 @@ delete its output files yourself first.
 
 View `.qzv` files with QIIME 2 View (<https://view.qiime2.org>) `[all]`.
 
+**How each stage section is laid out.** Every stage below ends with four parts:
+- **Run:** the one command to type, from the project folder, with the QIIME 2 environment
+  active.
+- **What it runs:** the QIIME 2 commands the script executes. Settings appear as `$NAME`
+  and are filled in from `pipeline/config.sh`; branches (paired/single, DADA2/Deblur,
+  tree/no tree) are noted in comments. You can copy these to run a step by hand.
+- **Outputs:** the files the stage creates under `results/`.
+- **Check:** what to look at before moving on.
+
+Each script also prints its settings report first and skips outputs that already exist.
+
 ### 2.1 Presets, the settings report, and one place for shared settings
 
 - **`PRESET="18S_PR2"`** (top of `config.sh`) switches the generic Illumina-16S defaults
@@ -154,7 +165,45 @@ View `.qzv` files with QIIME 2 View (<https://view.qiime2.org>) `[all]`.
      `[gut_to_soil_tutorial]`.
 4. **`demux summarize`** on the imported reads `[MH_2026.3-workflow §2.2]`.
 
-**Checkpoint:** sample count and per-sample depth look as expected.
+**Run**
+
+```bash
+bash pipeline/01_import_qc.sh
+```
+
+**What it runs** (settings shown as `$NAME` come from `pipeline/config.sh`)
+
+```bash
+qiime metadata tabulate \
+  --m-input-file $METADATA \
+  --o-visualization results/01_import/metadata.qzv
+
+# only if RUN_FASTQC=yes and fastqc + multiqc are on PATH
+fastqc -t $NCORES -o results/01_import/fastqc $RAW_DIR/*.f*q.gz
+multiqc results/01_import/fastqc --outdir results/01_import --filename multiqc_report.html
+
+# IMPORT_MODE=casava (Illumina paired-end shown)
+qiime tools import \
+  --type 'SampleData[PairedEndSequencesWithQuality]' \
+  --input-path $RAW_DIR \
+  --input-format CasavaOneEightSingleLanePerSampleDirFmt \
+  --output-path results/01_import/reads.qza
+# IMPORT_MODE=manifest instead: --input-path $MANIFEST --input-format PairedEndFastqManifestPhred33V2
+# single-end Illumina or PacBio: --type 'SampleData[SequencesWithQuality]' and SingleEndFastqManifestPhred33V2
+
+qiime demux summarize \
+  --i-data results/01_import/reads.qza \
+  --o-visualization results/01_import/reads_summary.qzv
+```
+
+**Outputs** (`results/01_import/`): `metadata.qzv`, `fastqc/` and `multiqc_report.html`
+(if run), `reads.qza`, `reads_summary.qzv`, `settings_used.tsv`.
+
+**Check**
+- `metadata.qzv` opens without errors.
+- In `reads_summary.qzv`, the number of samples is what you expect, and no sample has
+  far fewer reads than the rest.
+- In `multiqc_report.html`, look for outlier samples.
 
 ## Stage 2. Primer removal (`02_trim_primers.sh`, Illumina)
 
@@ -173,8 +222,51 @@ If the protocol does not sequence the primers (EMP 515F/806R as used in both QII
 tutorials), leave `PRIMER_F`/`PRIMER_R` empty and the stage passes the reads through
 unchanged. PacBio primers are removed inside `denoise-ccs` (stage 3) `[MH_2026.3-workflow]`.
 
-**Checkpoint:** most reads survive trimming. A large loss almost always means a wrong
-primer sequence `[MH_2026.3-workflow §2.3.2]`.
+**Run**
+
+```bash
+bash pipeline/02_trim_primers.sh
+```
+
+**What it runs**
+
+```bash
+qiime cutadapt trim-paired \
+  --i-demultiplexed-sequences results/01_import/reads.qza \
+  --p-front-f $PRIMER_F \
+  --p-front-r $PRIMER_R \
+  --p-discard-untrimmed \
+  --p-no-indels \
+  --p-cores $NCORES \
+  --o-trimmed-sequences results/02_trim/reads_trimmed.qza
+# single-end: qiime cutadapt trim-single with --p-front $PRIMER_F
+# PRIMER_F and PRIMER_R both empty: no trimming; reads.qza is linked as reads_trimmed.qza
+# PacBio: nothing runs here (primers are removed in stage 3)
+
+qiime demux summarize \
+  --i-data results/02_trim/reads_trimmed.qza \
+  --o-visualization results/02_trim/reads_trimmed_summary.qzv
+```
+
+With `PRESET="18S_PR2"`, `$PRIMER_F`/`$PRIMER_R` are `CYGCGGTAATTCCAGCTC` /
+`AYGGTATCTRATCRTCTTYG`.
+
+**Outputs** (`results/02_trim/`): `reads_trimmed.qza`, `reads_trimmed_summary.qzv`,
+`settings_used.tsv`.
+
+**Check**
+- Compare per-sample read counts in `reads_trimmed_summary.qzv` with
+  `results/01_import/reads_summary.qzv`. Most reads should survive; a large loss almost
+  always means a wrong primer sequence `[MH_2026.3-workflow §2.3.2]`.
+- Use the *Interactive Quality Plot* to choose `DADA2_TRUNC_F`/`DADA2_TRUNC_R` for stage 3.
+  To get the per-position numbers as tables (`forward-seven-number-summaries.tsv` and
+  `reverse-seven-number-summaries.tsv`), run:
+
+  ```bash
+  qiime tools export \
+    --input-path results/02_trim/reads_trimmed_summary.qzv \
+    --output-path results/02_trim/reads_trimmed_summary
+  ```
 
 ## Stage 3. Denoising (`03_denoise.sh`)
 
@@ -236,13 +328,88 @@ filter is applied (HiFi reads are ≥99% accurate). Parameter sets:
 All use `--p-pooling-method pseudo --p-n-reads-learn 100000`. The 16S window starts at
 1200 nt as in MH's command; MH's text says 1300 (comparison E5).
 
-**Checkpoint (all branches):** in `denoising_stats.qzv`, which the pipeline merges with the
-sample metadata `[gut_to_soil_tutorial]`, check the fraction of reads retained.
-- Losses at *filtered*: truncation is too aggressive.
-- Losses at *merged*: overlap is too short.
-- Losses at *non-chimeric*: often leftover primers.
 
-For Deblur, check `deblur_stats.qzv`. Very low post-Deblur depth is a red flag `[MH_*]`.
+**Run**
+
+```bash
+bash pipeline/03_denoise.sh
+```
+
+It stops and names the file to inspect if `DADA2_TRUNC_F`/`DADA2_TRUNC_R` (DADA2) or
+`DEBLUR_TRIM_LENGTH` (Deblur) is still empty.
+
+**What it runs: DADA2, Illumina paired-end (default)**
+
+```bash
+qiime dada2 denoise-paired \
+  --i-demultiplexed-seqs results/02_trim/reads_trimmed.qza \
+  --p-trim-left-f $DADA2_TRIM_LEFT_F --p-trim-left-r $DADA2_TRIM_LEFT_R \
+  --p-trunc-len-f $DADA2_TRUNC_F --p-trunc-len-r $DADA2_TRUNC_R \
+  --p-pooling-method $DADA2_POOLING \
+  --p-n-threads $NCORES \
+  --o-table results/03_denoise/table.qza \
+  --o-representative-sequences results/03_denoise/rep_seqs.qza \
+  --o-denoising-stats results/03_denoise/denoising_stats.qza \
+  --o-base-transition-stats results/03_denoise/base_transition_stats.qza
+# single-end: qiime dada2 denoise-single with --p-trim-left / --p-trunc-len
+```
+
+**What it runs: Deblur instead** (`DENOISER="deblur"`)
+
+```bash
+qiime vsearch merge-pairs --i-demultiplexed-seqs results/02_trim/reads_trimmed.qza --p-threads $NCORES \
+  --o-merged-sequences results/03_denoise/reads_merged.qza --o-unmerged-sequences results/03_denoise/reads_unmerged.qza
+qiime quality-filter q-score --i-demux results/03_denoise/reads_merged.qza \
+  --o-filtered-sequences results/03_denoise/reads_qfilt.qza --o-filter-stats results/03_denoise/qfilt_stats.qza
+qiime demux summarize --i-data results/03_denoise/reads_qfilt.qza --o-visualization results/03_denoise/reads_qfilt_summary.qzv
+qiime deblur denoise-16S --i-demultiplexed-seqs results/03_denoise/reads_qfilt.qza \
+  --p-trim-length $DEBLUR_TRIM_LENGTH --p-sample-stats --p-min-reads 1 --p-jobs-to-start $NCORES \
+  --o-table results/03_denoise/table.qza --o-representative-sequences results/03_denoise/rep_seqs.qza \
+  --o-stats results/03_denoise/deblur_stats.qza
+# 18S/ITS: qiime deblur denoise-other with --i-reference-seqs $DEBLUR_REF_SEQS
+qiime deblur visualize-stats --i-deblur-stats results/03_denoise/deblur_stats.qza \
+  --o-visualization results/03_denoise/deblur_stats.qzv
+```
+
+**What it runs: PacBio HiFi** (`PLATFORM="pacbio"`)
+
+```bash
+qiime dada2 denoise-ccs --i-demultiplexed-seqs results/01_import/reads.qza \
+  --p-front $CCS_FRONT --p-adapter $CCS_ADAPTER \
+  --p-min-len $CCS_MIN_LEN --p-max-len $CCS_MAX_LEN --p-max-ee $CCS_MAX_EE \
+  --p-pooling-method pseudo --p-n-reads-learn 100000 --p-n-threads $NCORES \
+  --o-table results/03_denoise/table.qza --o-representative-sequences results/03_denoise/rep_seqs.qza \
+  --o-denoising-stats results/03_denoise/denoising_stats.qza \
+  --o-base-transition-stats results/03_denoise/base_transition_stats.qza --verbose
+```
+
+**Then, for every branch**
+
+```bash
+# DADA2 only: denoising statistics shown next to the sample metadata
+qiime metadata tabulate --m-input-file $METADATA \
+  --m-input-file results/03_denoise/denoising_stats.qza \
+  --o-visualization results/03_denoise/denoising_stats.qzv
+qiime feature-table summarize --i-table results/03_denoise/table.qza --m-metadata-file $METADATA \
+  --o-summary results/03_denoise/table_summary.qzv \
+  --o-sample-frequencies results/03_denoise/table_sample_frequencies.qza \
+  --o-feature-frequencies results/03_denoise/table_feature_frequencies.qza
+qiime feature-table tabulate-seqs --i-data results/03_denoise/rep_seqs.qza \
+  --m-metadata-file results/03_denoise/table_feature_frequencies.qza \
+  --o-visualization results/03_denoise/rep_seqs.qzv
+```
+
+**Outputs** (`results/03_denoise/`): `table.qza`, `rep_seqs.qza`, `denoising_stats.qzv`
+(or `deblur_stats.qzv`), `table_summary.qzv`, `rep_seqs.qzv`, `settings_used.tsv`.
+
+**Check**
+- In `denoising_stats.qzv` (merged with the sample metadata `[gut_to_soil_tutorial]`),
+  look at the share of reads kept per sample at each step:
+  - losses at *filtered*: truncation is too aggressive
+  - losses at *merged*: the overlap is too short (watch this for 18S V4)
+  - losses at *non-chimeric*: often leftover primers
+- With Deblur, check `deblur_stats.qzv` instead. Very low depth after Deblur is a red flag
+  `[MH_*]`.
 
 ## Stage 4. Rare-ASV filtering (`04_filter_features.sh`)
 
@@ -264,9 +431,41 @@ removes nothing at all. With the preset on, set the 0 in any of three ways: edit
 (`yours`, `preset 18S_PR2` or `yours: override`). Don't add a second, different abundance
 filter in R (MH-R's ≥100 reads): one documented rule is easier to defend.
 
-**Checkpoint:** many ASVs but few reads should be removed.
+**Run**
 
-## Stage 5. Taxonomy (`05_taxonomy.sh`)
+```bash
+bash pipeline/04_filter_features.sh
+```
+
+**What it runs**
+
+```bash
+# mean reads per sample, used to compute the frequency threshold
+qiime tools export --input-path results/03_denoise/table.qza \
+  --output-path results/04_filter_features/denoised_table_biom
+biom summarize-table -i results/04_filter_features/denoised_table_biom/feature-table.biom
+# MIN_FREQ = round(MIN_FREQ_FRACTION x mean depth); written to filter_thresholds.tsv
+
+qiime feature-table filter-features --i-table results/03_denoise/table.qza \
+  --p-min-samples $MIN_SAMPLES --p-min-frequency $MIN_FREQ \
+  --o-filtered-table results/04_filter_features/table.qza
+qiime feature-table filter-seqs --i-data results/03_denoise/rep_seqs.qza \
+  --i-table results/04_filter_features/table.qza \
+  --o-filtered-data results/04_filter_features/rep_seqs.qza
+qiime feature-table summarize --i-table results/04_filter_features/table.qza --m-metadata-file $METADATA \
+  --o-summary results/04_filter_features/table_summary.qzv \
+  --o-sample-frequencies results/04_filter_features/table_sample_frequencies.qza \
+  --o-feature-frequencies results/04_filter_features/table_feature_frequencies.qza
+```
+
+**Outputs** (`results/04_filter_features/`): `table.qza`, `rep_seqs.qza`,
+`table_summary.qzv`, `filter_thresholds.tsv`, `settings_used.tsv`.
+
+**Check**
+- Compare `table_summary.qzv` with `results/03_denoise/table_summary.qzv`. Many ASVs but
+  only a small share of reads should be removed.
+
+## Stage 5. Taxonomy (`05a_build_pr2_classifier.sh`, `05_taxonomy.sh`)
 
 `classify-sklearn` with a **pre-trained, full-length** Naive Bayes classifier
 `[MH_2026.3-workflow]` `[conceptual_overview]`. Region-specific classifiers are no longer
@@ -305,11 +504,79 @@ recommended by MH or by QIIME 2.
 - `--p-read-orientation same` is set because the reads are already in amplicon orientation
   after primer trimming or `denoise-ccs` `[MH_2026.3-workflow]`.
 
-**Checkpoint:** open `rep_seqs_taxonomy.qzv`, which shows sequence, taxonomy, frequency
-and BLAST links `[gut_to_soil_tutorial]`. BLAST about 5 abundant ASVs from different phyla
-and compare `[MH_*]` `[moving_pictures_tutorial]`. Trust the curated classifier over
-individual BLAST hits `[gut_to_soil_tutorial]`. Many phylum-unassigned ASVs mean a wrong
-classifier for the marker, wrong orientation, or off-target amplification.
+### 5a. Build the PR2 classifier (`05a_build_pr2_classifier.sh`, only when `BUILD_PR2_CLASSIFIER=yes`)
+
+**Run** (once per project; needs a large-memory node)
+
+```bash
+bash pipeline/05a_build_pr2_classifier.sh
+```
+
+**What it runs**
+
+```bash
+qiime rescript get-pr2-data --p-version $PR2_VERSION \
+  --o-pr2-sequences results/05a_pr2_classifier/pr2_sequences.qza \
+  --o-pr2-taxonomy results/05a_pr2_classifier/pr2_taxonomy.qza
+qiime rescript dereplicate \
+  --i-sequences results/05a_pr2_classifier/pr2_sequences.qza \
+  --i-taxa results/05a_pr2_classifier/pr2_taxonomy.qza \
+  --p-mode uniq --p-rank-handles disable --p-threads $NCORES \
+  --o-dereplicated-sequences results/05a_pr2_classifier/pr2_derep_sequences.qza \
+  --o-dereplicated-taxa results/05a_pr2_classifier/pr2_derep_taxonomy.qza
+qiime feature-classifier fit-classifier-naive-bayes \
+  --i-reference-reads results/05a_pr2_classifier/pr2_derep_sequences.qza \
+  --i-reference-taxonomy results/05a_pr2_classifier/pr2_derep_taxonomy.qza \
+  --o-classifier results/05a_pr2_classifier/pr2_${PR2_VERSION}_classifier.qza
+```
+
+If `BUILD_PR2_CLASSIFIER` is not `yes`, the script does nothing.
+
+**Outputs** (`results/05a_pr2_classifier/`): `pr2_<version>_classifier.qza` plus the
+downloaded and dereplicated reference.
+
+**Check**
+- The log ends with "Classifier ready".
+- The stage 5 settings report shows `CLASSIFIER` pointing to this file, tagged
+  `(preset 18S_PR2)`.
+
+### 5b. Classify (`05_taxonomy.sh`)
+
+**Run**
+
+```bash
+bash pipeline/05_taxonomy.sh
+```
+
+**What it runs**
+
+```bash
+qiime feature-classifier classify-sklearn \
+  --i-reads results/04_filter_features/rep_seqs.qza \
+  --i-classifier $CLASSIFIER \
+  --p-confidence $CLASSIFY_CONFIDENCE \
+  --p-read-orientation same \
+  --p-n-jobs $NCORES \
+  --o-classification results/05_taxonomy/taxonomy.qza
+qiime feature-table tabulate-seqs \
+  --i-data results/04_filter_features/rep_seqs.qza \
+  --i-taxonomy $CLASSIFIER_LABEL:results/05_taxonomy/taxonomy.qza \
+  --m-metadata-file results/04_filter_features/table_feature_frequencies.qza \
+  --o-visualization results/05_taxonomy/rep_seqs_taxonomy.qzv
+```
+
+**Outputs** (`results/05_taxonomy/`): `taxonomy.qza`, `rep_seqs_taxonomy.qzv`,
+`settings_used.tsv`.
+
+**Check**
+- In `rep_seqs_taxonomy.qzv`, which shows sequence, taxonomy, frequency and BLAST links
+  `[gut_to_soil_tutorial]`, BLAST about 5 abundant ASVs from different groups and compare
+  `[MH_*]` `[moving_pictures_tutorial]`. Trust the curated classifier over individual BLAST
+  hits `[gut_to_soil_tutorial]`.
+- Many ASVs unassigned at the second rank mean a wrong classifier for the marker, wrong
+  orientation, or off-target amplification.
+- See how deep the assignments go. With PR2, check how many reads reach the rank you set
+  in `TAXA_COLLAPSE_LEVEL`.
 
 ## Stage 6. Taxonomy filtering and failed samples (`06_filter_taxa_samples.sh`)
 
@@ -333,10 +600,59 @@ classifier for the marker, wrong orientation, or off-target amplification.
    Use `1` to keep everything.
 4. Filter the representative sequences to the final table.
 
-**Checkpoint:** choose `SAMPLING_DEPTH` (the even-sampling depth) in
-`table_final_summary.qzv`. Make it as high as possible while losing few samples, near where
-the curves level off `[all]`. Results are fairly stable across reasonable depths, so try
-two and compare `[gut_to_soil_tutorial (dev)]`.
+**Run** (twice: the first run stops at the `MIN_SAMPLE_DEPTH` checkpoint)
+
+```bash
+bash pipeline/06_filter_taxa_samples.sh
+# set MIN_SAMPLE_DEPTH in pipeline/config.sh, then:
+bash pipeline/06_filter_taxa_samples.sh
+```
+
+**What it runs**
+
+```bash
+qiime taxa filter-table --i-table results/04_filter_features/table.qza \
+  --i-taxonomy results/05_taxonomy/taxonomy.qza \
+  --p-exclude $TAXA_EXCLUDE \
+  --o-filtered-table results/06_filter_taxa_samples/table_taxfilt.qza
+# --p-include $TAXA_INCLUDE is added when set; with both empty the table is copied unchanged
+qiime feature-table summarize --i-table results/06_filter_taxa_samples/table_taxfilt.qza --m-metadata-file $METADATA \
+  --o-summary results/06_filter_taxa_samples/table_taxfilt_summary.qzv \
+  --o-sample-frequencies results/06_filter_taxa_samples/table_taxfilt_sample_frequencies.qza \
+  --o-feature-frequencies results/06_filter_taxa_samples/table_taxfilt_feature_frequencies.qza
+
+# rarefaction curves up to the median sample depth (MEDIAN, from biom summarize-table)
+qiime diversity alpha-rarefaction --i-table results/06_filter_taxa_samples/table_taxfilt.qza \
+  --p-max-depth $MEDIAN --p-steps 20 --p-metrics observed_features shannon \
+  --m-metadata-file $METADATA --o-visualization results/06_filter_taxa_samples/rarefaction_grouped.qzv
+qiime diversity alpha-rarefaction --i-table results/06_filter_taxa_samples/table_taxfilt.qza \
+  --p-max-depth $MEDIAN --p-steps 20 --p-metrics observed_features shannon \
+  --o-visualization results/06_filter_taxa_samples/rarefaction_per_sample.qzv
+
+# after MIN_SAMPLE_DEPTH is set:
+qiime feature-table filter-samples --i-table results/06_filter_taxa_samples/table_taxfilt.qza \
+  --p-min-frequency $MIN_SAMPLE_DEPTH --o-filtered-table results/06_filter_taxa_samples/table_final.qza
+qiime feature-table filter-seqs --i-data results/04_filter_features/rep_seqs.qza \
+  --i-table results/06_filter_taxa_samples/table_final.qza \
+  --o-filtered-data results/06_filter_taxa_samples/rep_seqs_final.qza
+qiime feature-table summarize --i-table results/06_filter_taxa_samples/table_final.qza --m-metadata-file $METADATA \
+  --o-summary results/06_filter_taxa_samples/table_final_summary.qzv \
+  --o-sample-frequencies results/06_filter_taxa_samples/table_final_sample_frequencies.qza \
+  --o-feature-frequencies results/06_filter_taxa_samples/table_final_feature_frequencies.qza
+```
+
+**Outputs** (`results/06_filter_taxa_samples/`): `table_taxfilt.qza` and its summary,
+`rarefaction_grouped.qzv`, `rarefaction_per_sample.qzv`, `table_final.qza`,
+`rep_seqs_final.qza`, `table_final_summary.qzv`, `settings_used.tsv`.
+
+**Check**
+- In the rarefaction curves, see where richness levels off before choosing
+  `MIN_SAMPLE_DEPTH`.
+- In `table_final_summary.qzv` (*Interactive Sample Detail*, grouped by your main column),
+  see how many samples each group loses, then choose `SAMPLING_DEPTH` for stage 8. Make it
+  as high as possible while losing few samples, near where the curves level off `[all]`.
+  Results are fairly stable across reasonable depths, so try two and compare
+  `[gut_to_soil_tutorial (dev)]`.
 
 ## Stage 7. Phylogeny (`07_phylogeny.sh`)
 
@@ -349,6 +665,40 @@ two and compare `[gut_to_soil_tutorial (dev)]`.
 SEPP references `[MH_2026.3-workflow]`: Greengenes2 2022.10 backbone (MH's current choice,
 from the MH server), `https://data.qiime2.org/classifiers/sepp-ref-dbs/sepp-refs-silva-128.qza`,
 or `.../sepp-refs-gg-13-8.qza`.
+
+**Run**
+
+```bash
+bash pipeline/07_phylogeny.sh
+```
+
+**What it runs** (`TREE_METHOD=auto` picks by `MARKER`: 16S → sepp, 18S → denovo,
+anything else → none; the 18S_PR2 preset sets `none`)
+
+```bash
+# sepp
+qiime fragment-insertion sepp --i-representative-sequences results/06_filter_taxa_samples/rep_seqs_final.qza \
+  --i-reference-database $SEPP_REF --p-threads $NCORES \
+  --o-tree results/07_phylogeny/tree.qza --o-placements results/07_phylogeny/placements.qza
+qiime fragment-insertion filter-features --i-table results/06_filter_taxa_samples/table_final.qza \
+  --i-tree results/07_phylogeny/tree.qza \
+  --o-filtered-table results/07_phylogeny/table_placed.qza --o-removed-table results/07_phylogeny/table_unplaced.qza
+
+# denovo
+qiime phylogeny align-to-tree-mafft-fasttree --i-sequences results/06_filter_taxa_samples/rep_seqs_final.qza \
+  --p-n-threads $NCORES --o-alignment results/07_phylogeny/aligned_rep_seqs.qza \
+  --o-masked-alignment results/07_phylogeny/masked_aligned_rep_seqs.qza \
+  --o-tree results/07_phylogeny/unrooted_tree.qza --o-rooted-tree results/07_phylogeny/tree.qza
+
+# none: nothing runs; stage 8 uses non-phylogenetic metrics
+```
+
+**Outputs** (`results/07_phylogeny/`): `tree.qza` and `table_placed.qza` (sepp/denovo),
+`table_unplaced_summary.qzv` (sepp), `settings_used.tsv`.
+
+**Check**
+- With SEPP, `table_unplaced_summary.qzv` shows the reads lost because their ASVs could not
+  be placed. It is usually a small share.
 
 ## Stage 8. Diversity and group statistics (`08_diversity.sh`)
 
@@ -381,6 +731,69 @@ Statistics:
   **sequentially** (`by = "terms"`, so order matters); the R script reports **marginal**
   terms (comparison E14).
 
+**Run**
+
+```bash
+bash pipeline/08_diversity.sh
+```
+
+**What it runs**
+
+```bash
+qiime boots core-metrics --i-table <table> \
+  --m-metadata-file $METADATA --p-sampling-depth $SAMPLING_DEPTH --p-n $BOOTS_N \
+  --p-no-replacement --p-alpha-average-method median --p-beta-average-method medoid \
+  --p-random-seed $RANDOM_SEED \
+  --o-resampled-tables results/08_diversity/core/resampled_tables \
+  --o-alpha-diversities results/08_diversity/core/alpha \
+  --o-distance-matrices results/08_diversity/core/distance \
+  --o-pcoas results/08_diversity/core/pcoa \
+  --o-emperor-plots results/08_diversity/core/emperor \
+  --o-scatter-plot results/08_diversity/core/scatter_plot.qzv
+# <table> is results/07_phylogeny/table_placed.qza plus --i-phylogeny results/07_phylogeny/tree.qza
+#   when a tree exists, otherwise results/06_filter_taxa_samples/table_final.qza
+# --p-random-seed is added on QIIME 2 2026.4 and later
+
+# for each alpha metric in core/alpha/ (e.g. shannon):
+qiime diversity alpha-group-significance --i-alpha-diversity results/08_diversity/core/alpha/shannon.qza \
+  --m-metadata-file $METADATA --o-visualization results/08_diversity/alpha_shannon_groups.qzv
+qiime diversity alpha-correlation --i-alpha-diversity results/08_diversity/core/alpha/shannon.qza \
+  --m-metadata-file $METADATA --p-method spearman --o-visualization results/08_diversity/alpha_shannon_correlation.qzv
+
+# for each distance matrix in core/distance/ (e.g. braycurtis), if GROUP_COL is set;
+# the same command again with --p-method permdisp
+qiime diversity beta-group-significance --i-distance-matrix results/08_diversity/core/distance/braycurtis.qza \
+  --m-metadata-file $METADATA --m-metadata-column $GROUP_COL \
+  --p-method permanova --p-pairwise --p-permutations 999 \
+  --o-visualization results/08_diversity/beta_braycurtis_${GROUP_COL}_permanova.qzv
+
+# for each distance matrix, if ADONIS_FORMULA is set:
+qiime diversity adonis --i-distance-matrix results/08_diversity/core/distance/braycurtis.qza \
+  --m-metadata-file $METADATA --p-formula "$ADONIS_FORMULA" --p-permutations 999 --p-n-jobs $NCORES \
+  --o-visualization results/08_diversity/adonis_braycurtis.qzv
+
+# if RUN_KMER_DIVERSITY=yes:
+qiime boots kmer-diversity --i-table results/06_filter_taxa_samples/table_final.qza \
+  --i-sequences results/06_filter_taxa_samples/rep_seqs_final.qza --m-metadata-file $METADATA \
+  --p-sampling-depth $SAMPLING_DEPTH --p-n $BOOTS_N --p-no-replacement --p-random-seed $RANDOM_SEED \
+  --o-resampled-tables results/08_diversity/kmer/resampled_tables --o-kmer-tables results/08_diversity/kmer/kmer_tables \
+  --o-alpha-diversities results/08_diversity/kmer/alpha --o-distance-matrices results/08_diversity/kmer/distance \
+  --o-pcoas results/08_diversity/kmer/pcoa --o-scatter-plot results/08_diversity/kmer/scatter_plot.qzv
+```
+
+Without a tree, the metrics are Shannon, observed features, Pielou evenness, Bray–Curtis
+and Jaccard. A tree adds Faith PD and weighted/unweighted UniFrac.
+
+**Outputs** (`results/08_diversity/`): `core/` (`alpha/`, `distance/`, `pcoa/`,
+`emperor/`, `scatter_plot.qzv`), `alpha_*_groups.qzv`, `alpha_*_correlation.qzv`,
+`beta_*_permanova.qzv`, `beta_*_permdisp.qzv`, `adonis_*.qzv`, `kmer/` (if run),
+`settings_used.tsv`.
+
+**Check**
+- Ordinations: `core/scatter_plot.qzv` and `core/emperor/`.
+- Read each PERMANOVA together with its PERMDISP. If PERMDISP is also significant, the
+  groups may differ in spread rather than in position.
+
 ## Stage 9. Composition and differential abundance (`09_composition_da.sh`)
 
 - `taxa barplot` on the ASV table `[all]`. Also a per-group summed barplot through
@@ -398,6 +811,55 @@ Statistics:
 - **Treat hits as hypotheses** `[gut_to_soil_tutorial]`, and confirm them with the R
   consensus (stage 11).
 
+**Run**
+
+```bash
+bash pipeline/09_composition_da.sh
+```
+
+**What it runs**
+
+```bash
+qiime taxa barplot --i-table results/06_filter_taxa_samples/table_final.qza \
+  --i-taxonomy results/05_taxonomy/taxonomy.qza --m-metadata-file $METADATA \
+  --o-visualization results/09_composition_da/taxa_barplot.qzv
+qiime feature-table group --i-table results/06_filter_taxa_samples/table_final.qza \
+  --p-axis sample --p-mode sum --m-metadata-file $METADATA --m-metadata-column $GROUP_COL \
+  --o-grouped-table results/09_composition_da/table_by_${GROUP_COL}.qza
+qiime taxa barplot --i-table results/09_composition_da/table_by_${GROUP_COL}.qza \
+  --i-taxonomy results/05_taxonomy/taxonomy.qza \
+  --o-visualization results/09_composition_da/taxa_barplot_by_${GROUP_COL}.qzv
+
+# only if DA_SAMPLE_FILTER is set; the filtered table is then used below
+qiime feature-table filter-samples --i-table results/06_filter_taxa_samples/table_final.qza \
+  --m-metadata-file $METADATA --p-where "$DA_SAMPLE_FILTER" \
+  --o-filtered-table results/09_composition_da/table_da.qza
+
+# <rank> is the lower-case name of rank number TAXA_COLLAPSE_LEVEL (e.g. genus)
+qiime taxa collapse --i-table <DA table> --i-taxonomy results/05_taxonomy/taxonomy.qza \
+  --p-level $TAXA_COLLAPSE_LEVEL --o-collapsed-table results/09_composition_da/table_da_<rank>.qza
+
+# twice: on the ASV table (output name ancombc2_asv) and on table_da_<rank>.qza (ancombc2_<rank>)
+qiime composition ancombc2 --i-table <table> --m-metadata-file $METADATA \
+  --p-fixed-effects-formula $GROUP_COL --p-reference-levels $DA_REFERENCE \
+  --p-num-processes $NCORES --o-ancombc2-output results/09_composition_da/ancombc2_asv.qza
+qiime composition da-barplot --i-data results/09_composition_da/ancombc2_asv.qza \
+  --i-taxonomy results/05_taxonomy/taxonomy.qza --o-visualization results/09_composition_da/ancombc2_asv.qzv
+qiime composition tabulate --i-data results/09_composition_da/ancombc2_asv.qza \
+  --o-visualization results/09_composition_da/ancombc2_asv_table.qzv
+# --p-reference-levels only if DA_REFERENCE is set; --i-taxonomy only for the ASV-level plot
+# QIIME 2 2026.1: qiime composition ancombc2-visualizer instead of da-barplot
+```
+
+**Outputs** (`results/09_composition_da/`): `taxa_barplot.qzv`,
+`taxa_barplot_by_<group>.qzv`, `ancombc2_asv.qza/.qzv`, `ancombc2_<rank>.qza/.qzv`, their
+`_table.qzv` views, `settings_used.tsv`.
+
+**Check**
+- The log line "Collapsing to taxonomy level N (rank)" names the rank you intended.
+- Treat significant features as hypotheses, and confirm them with the R consensus in
+  stage 11.
+
 ## Stage 10. Export and provenance (`10_export_provenance.sh`)
 
 - Exports `feature-table.biom` / `.tsv`, `taxonomy.tsv`, `rep_seqs.fasta`, `tree.nwk` and a
@@ -407,6 +869,39 @@ Statistics:
   `replay-supplement` writes a methods supplement with citations `[gut_to_soil_tutorial]`.
   (`qiime tools make-report`, mentioned in the development tutorial, is **not** in q2cli
   2026.7.)
+
+**Run**
+
+```bash
+bash pipeline/10_export_provenance.sh
+```
+
+**What it runs**
+
+```bash
+qiime tools export --input-path results/06_filter_taxa_samples/table_final.qza --output-path results/10_export/qiime_export/table
+qiime tools export --input-path results/05_taxonomy/taxonomy.qza --output-path results/10_export/qiime_export/taxonomy
+qiime tools export --input-path results/06_filter_taxa_samples/rep_seqs_final.qza --output-path results/10_export/qiime_export/rep_seqs
+biom convert -i results/10_export/feature-table.biom -o results/10_export/feature-table.tsv --to-tsv
+biom add-metadata -i results/10_export/feature-table.biom -o results/10_export/feature-table_w_tax.biom \
+  --observation-metadata-fp results/10_export/qiime_export/taxonomy_biom_header.tsv --sc-separated taxonomy
+biom convert -i results/10_export/feature-table_w_tax.biom -o results/10_export/feature-table_w_tax.txt \
+  --to-tsv --header-key taxonomy
+# if a tree exists:
+qiime tools export --input-path results/07_phylogeny/tree.qza --output-path results/10_export/qiime_export/tree
+# then writes analysis_settings.tsv (ranks, levels, depth, group, reference, seed) for R
+qiime tools replay-provenance --in-fp results --recurse --out-fp results/10_export/replayed_commands.sh
+qiime tools replay-supplement --in-fp results --recurse --out-fp results/10_export/reproducibility_supplement.zip
+```
+
+**Outputs** (`results/10_export/`): `feature-table.biom/.tsv`, `feature-table_w_tax.biom/.txt`,
+`taxonomy.tsv`, `rep_seqs.fasta`, `tree.nwk` (if any), `metadata.tsv`,
+`analysis_settings.tsv`, `replayed_commands.sh`, `reproducibility_supplement.zip`,
+`settings_used.tsv`.
+
+**Check**
+- The stage stops if `taxonomy.tsv` has more ranks than `TAXONOMY_RANKS`.
+- `analysis_settings.tsv` shows the ranks, collapse level and sampling depth you intended.
 
 ## Stage 11. R analysis (`R/downstream_analysis.R`)
 
@@ -424,6 +919,27 @@ Follows `[MH_2026.3-R]`, with the defects listed in the comparison (E8–E15) fi
 
 The reference level comes from `DA_REFERENCE` (e.g. `treatment::control`). Set
 `cfg$covariates` (e.g. `c("site")`) at the top of the script for adjusted models.
+
+**Run** (in the R environment from §1)
+
+```bash
+Rscript R/downstream_analysis.R results/10_export results/11_R
+# optional third argument: a metadata column to use instead of GROUP_COL
+```
+
+**What it runs:** the R script itself. It reads `analysis_settings.tsv`, then runs the
+alpha/beta diversity, composition plots and the ANCOM-BC2 + ALDEx2 + MaAsLin3 consensus
+described above.
+
+**Outputs** (`results/11_R/`): `settings_used.csv`, `sample_depths.csv`,
+`rarefaction_curves.pdf`, `alpha_diversity.csv/.pdf`, `alpha_tests.csv`, `pcoa_*.pdf`,
+`beta_permanova_dispersion.csv`, `barplot_<rank>.pdf`, `da_all_methods.csv`,
+`da_consensus.csv`, `da_consensus_boxplots.pdf`, `maaslin3/`, `sessionInfo.txt`.
+
+**Check**
+- The "Settings used" lines at the start of the output match `config.sh`: ranks, DA rank,
+  depth and reference group.
+- `da_consensus.csv` lists the taxa found by at least 2 methods with the same direction.
 
 ---
 
