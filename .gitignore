@@ -1,0 +1,12 @@
+# Pipeline inputs and outputs (large, project-specific)
+raw_data/
+results/
+*.qza
+*.qzv
+*.fastq.gz
+*.fq.gz
+
+# R session files
+.Rhistory
+.RData
+.Rproj.user/

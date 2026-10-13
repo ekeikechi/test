@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Test stub for the biom-format CLI: records calls and fakes summarize-table / outputs.
+echo "biom $*" >> "$SMOKE_LOG"
+if [[ $1 == summarize-table ]]; then
+    printf 'Num samples: 3\nCounts/sample summary:\n Min: 10.000\n Max: 50,000.000\n Median: 12,345.600\n Mean: 23,456.700\n'
+    exit 0
+fi
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+    [[ ${args[i]} == -o ]] && touch "${args[i + 1]}"
+done
+exit 0

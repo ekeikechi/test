@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Test stub for `qiime`: records each call in $SMOKE_LOG and fakes its outputs, so the
+# pipeline's control flow and file chaining can be tested without QIIME 2 installed.
+# It fails like the real CLI would when an input is missing or an output already exists.
+echo "qiime $*" >> "$SMOKE_LOG"
+args=("$@")
+
+if [[ "$1 $2" == "tools export" ]]; then
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        [[ ${args[i]} == --output-path ]] && out=${args[i + 1]}
+        [[ ${args[i]} == --input-path ]] && in=${args[i + 1]}
+    done
+    mkdir -p "$out"
+    case "$in" in
+        *taxonomy*) touch "$out/taxonomy.tsv" ;;
+        *rep_seqs*) touch "$out/dna-sequences.fasta" ;;
+        *tree*)     touch "$out/tree.nwk" ;;
+        *)          touch "$out/feature-table.biom" ;;
+    esac
+    exit 0
+fi
+
+if [[ "$1" == tools ]]; then   # import, replay-provenance, replay-supplement
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        [[ ${args[i]} == --output-path || ${args[i]} == --out-fp ]] && touch "${args[i + 1]}"
+    done
+    exit 0
+fi
+
+for ((i = 0; i < ${#args[@]}; i++)); do
+    a=${args[i]}; v=${args[i + 1]:-}
+    case "$a" in
+        --o-alpha-diversities) mkdir -p "$v"; touch "$v"/{shannon,observed_features,pielou_e,faith_pd}.qza ;;
+        --o-distance-matrices) mkdir -p "$v"; touch "$v"/{braycurtis,jaccard,unweighted_unifrac,weighted_unifrac}.qza ;;
+        --o-resampled-tables | --o-pcoas | --o-emperor-plots | --o-kmer-tables) mkdir -p "$v" ;;
+        --o-*)
+            [[ -d "$(dirname "$v")" ]] || { echo "STUB: missing dir for $v" >&2; exit 3; }
+            [[ -e "$v" ]] && { echo "STUB: output exists $v" >&2; exit 4; }
+            touch "$v" ;;
+        --i-*)
+            [[ "$v" == *:* ]] && v=${v#*:}   # key:path collection syntax
+            [[ -e "$v" ]] || { echo "STUB: missing input $a $v" >&2; exit 2; } ;;
+    esac
+done
+exit 0
