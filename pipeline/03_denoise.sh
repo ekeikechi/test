@@ -6,6 +6,10 @@
 # All branches write D/table.qza and D/rep_seqs.qza so later stages need no branching.
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/03_denoise"; mkdir -p "$D"
+show_settings "$D" \
+    PLATFORM LAYOUT MARKER DENOISER DADA2_TRIM_LEFT_F DADA2_TRIM_LEFT_R \
+    DADA2_TRUNC_F DADA2_TRUNC_R DADA2_POOLING DEBLUR_TRIM_LENGTH DEBLUR_REF_SEQS \
+    CCS_FRONT CCS_ADAPTER CCS_MIN_LEN CCS_MAX_LEN CCS_MAX_EE NCORES
 
 if [[ "$PLATFORM" == "pacbio" ]]; then
     IN="${OUT}/01_import/reads.qza"

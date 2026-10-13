@@ -5,6 +5,9 @@
 #          [experienced_researchers: manifest import "will always work"]
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/01_import"; mkdir -p "$D"
+show_settings "$D" \
+    Q2_EPOCH PRESET PLATFORM LAYOUT IMPORT_MODE RAW_DIR MANIFEST METADATA RUN_FASTQC \
+    NCORES
 
 log "Validating sample metadata"
 # Fails early on malformed metadata (duplicate IDs, bad headers) before hours of compute.

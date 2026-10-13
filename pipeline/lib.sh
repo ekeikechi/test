@@ -1,9 +1,28 @@
 # shellcheck shell=bash
 # Shared helpers for the stage scripts. Sourced, never executed directly.
+#
+# Portability: works on bash 3.2+. Arrays that may be empty are expanded as
+# ${arr[@]+"${arr[@]}"}, because bash < 4.4 treats "${arr[@]}" of an empty array as
+# an unbound variable under `set -u`.
 
 set -euo pipefail
 
 PIPELINE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# preset VAR SHIPPED VALUE: used by the preset block in config.sh.
+# Sets VAR to VALUE only while VAR still holds the value shipped in config.sh, so a
+# preset never overwrites a value you changed yourself. The outcome is recorded in
+# PRESET_SRC_<VAR> and reported by show_settings.
+preset() {
+    local var="$1" shipped="$2" value="$3"
+    if [[ "${!var-}" == "$shipped" ]]; then
+        printf -v "$var" '%s' "$value"
+        printf -v "PRESET_SRC_${var}" '%s' "preset ${PRESET}"
+    else
+        printf -v "PRESET_SRC_${var}" '%s' "yours; preset ${PRESET} would set '${value}'"
+    fi
+}
+
 # shellcheck source=config.sh
 source "${PIPELINE_DIR}/config.sh"
 
@@ -21,6 +40,39 @@ have() { [[ -e "$1" ]]; }
 
 # run CMD...: echo the command, then execute it.
 run() { printf '+ %s\n' "$*" >&2; "$@"; }
+
+# show_settings STAGE_DIR VAR...: print the settings this stage uses, each with its
+# source (config / preset / yours), at the start of the log, and save them to
+# STAGE_DIR/settings_used.tsv.
+show_settings() {
+    local dir="$1" var src_var
+    shift
+    mkdir -p "$dir"
+    {
+        printf 'setting\tvalue\tsource\n'
+        for var in "$@"; do
+            src_var="PRESET_SRC_${var}"
+            printf '%s\t%s\t%s\n' "$var" "${!var-}" "${!src_var:-config}"
+        done
+    } > "$dir/settings_used.tsv"
+    printf '\n[%s] Settings used by %s (preset: %s)\n' \
+        "$(date '+%H:%M:%S')" "$(basename "$0")" "${PRESET:-none}" >&2
+    awk -F'\t' 'NR > 1 { printf "  %-22s = %-40s (%s)\n", $1, ($2 == "" ? "<empty>" : $2), $3 }' \
+        "$dir/settings_used.tsv" >&2
+}
+
+# rank_count / rank_name N: the configured taxonomy ranks (TAXONOMY_RANKS, 1-based).
+rank_count() {
+    # shellcheck disable=SC2086  # word splitting of the rank list is intended
+    set -- $TAXONOMY_RANKS
+    echo "$#"
+}
+rank_name() {
+    local i="$1"
+    # shellcheck disable=SC2086
+    set -- $TAXONOMY_RANKS
+    echo "${!i}"
+}
 
 # epoch_ge X: true when Q2_EPOCH >= X (both as YYYY.M).
 epoch_ge() {
@@ -49,6 +101,16 @@ summarize() {
         --o-sample-frequencies "${prefix}_sample_frequencies.qza" \
         --o-feature-frequencies "${prefix}_feature_frequencies.qza"
 }
+
+# ---- configuration checks ----------------------------------------------------
+case "${PRESET}" in ""|18S_PR2) ;; *) die "Unknown PRESET '${PRESET}' (use \"\" or \"18S_PR2\")." ;; esac
+for level_var in TAXA_COLLAPSE_LEVEL OVERVIEW_RANK_LEVEL; do
+    level="${!level_var}"
+    [[ "$level" =~ ^[1-9][0-9]*$ ]] || die "${level_var} must be a positive integer (got '${level}')."
+    (( level <= $(rank_count) )) \
+        || die "${level_var}=${level} but TAXONOMY_RANKS lists only $(rank_count) ranks: ${TAXONOMY_RANKS}"
+done
+unset level_var level
 
 command -v qiime >/dev/null 2>&1 || die "qiime not found: activate the QIIME 2 ${Q2_EPOCH} environment first."
 mkdir -p "$OUT"

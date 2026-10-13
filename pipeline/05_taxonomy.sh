@@ -6,10 +6,15 @@
 # release, otherwise classify-sklearn stops with a version-mismatch ValueError.
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/05_taxonomy"; mkdir -p "$D"
+show_settings "$D" \
+    CLASSIFIER CLASSIFIER_LABEL CLASSIFY_CONFIDENCE TAXONOMY_RANKS NCORES
 SEQS="${OUT}/04_filter_features/rep_seqs.qza"
 
 need CLASSIFIER "Download a classifier matching QIIME 2 ${Q2_EPOCH} (see docs/02-optimized-amplicon-sop.md, stage 5)."
-[[ -f "$CLASSIFIER" ]] || die "Classifier not found: $CLASSIFIER"
+if [[ ! -f "$CLASSIFIER" ]]; then
+    [[ "$BUILD_PR2_CLASSIFIER" == "yes" ]] && die "Classifier not found: $CLASSIFIER. Run 05a_build_pr2_classifier.sh first."
+    die "Classifier not found: $CLASSIFIER"
+fi
 
 # Reads are in amplicon orientation after primer trimming (and after denoise-ccs),
 # so 'same' skips the orientation guess [MH_2026.3-workflow §3.2].

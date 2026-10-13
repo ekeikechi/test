@@ -71,7 +71,7 @@ project/
 ├── raw_data/            demultiplexed FASTQ(.gz)
 ├── metadata.tsv         QIIME 2 metadata (first column = sample id; no personal data)
 ├── manifest.tsv         only when IMPORT_MODE=manifest
-├── pipeline/            config.sh, lib.sh, 01_…10_ stage scripts
+├── pipeline/            config.sh, lib.sh, stage scripts 01_…10_ (+ optional 05a_)
 ├── R/downstream_analysis.R
 └── results/             created by the pipeline: one folder per stage
 ```
@@ -81,9 +81,9 @@ Edit `pipeline/config.sh`, then run the stages in order:
 ```bash
 bash pipeline/01_import_qc.sh
 bash pipeline/02_trim_primers.sh
-# ...through to...
+# ...03, 04, 05a (only builds a PR2 classifier when BUILD_PR2_CLASSIFIER=yes), 05...
 bash pipeline/10_export_provenance.sh
-Rscript R/downstream_analysis.R results/10_export results/11_R <group_column>
+Rscript R/downstream_analysis.R results/10_export results/11_R   # group from GROUP_COL
 ```
 
 The pipeline needs human decisions at several points: truncation lengths, the minimum sample
@@ -93,6 +93,28 @@ that stage. Stages skip outputs that already exist, so re-running is safe. To re
 delete its output files yourself first.
 
 View `.qzv` files with QIIME 2 View (<https://view.qiime2.org>) `[all]`.
+
+### 2.1 Presets, the settings report, and one place for shared settings
+
+- **`PRESET="18S_PR2"`** (top of `config.sh`) switches the generic Illumina-16S defaults
+  to 18S V4 + PR2. The preset block at the end of `config.sh` lists every value it changes.
+  A preset **only changes a setting you left at the value shipped in `config.sh`**: if you
+  edited it, your value is kept. The rare-ASV frequency rule has two lines in the block;
+  keep one active (0.001 keeps the 0.1% rule, which is active as shipped; 0 drops it).
+- **Settings report.** Each stage starts its log with the settings it used, tagged
+  `(config)`, `(preset 18S_PR2)` or `(yours; preset 18S_PR2 would set '…')`. It saves the
+  same list to `results/<stage>/settings_used.tsv`. The R script prints and saves its own
+  list (`settings_used.csv`).
+- **Shared settings live only in `config.sh`.** These are `TAXONOMY_RANKS` (rank names),
+  `TAXA_COLLAPSE_LEVEL` (rank number for collapsed-table differential abundance),
+  `OVERVIEW_RANK_LEVEL`, `SAMPLING_DEPTH`, `GROUP_COL`, `DA_REFERENCE` and `RANDOM_SEED`.
+  Stage 10 writes them to `results/10_export/analysis_settings.tsv`, which the R script
+  reads, so QIIME 2 and R always analyse the same rank and depth.
+- **Safety checks.** A collapse level beyond the number of ranks stops every stage.
+  Stage 10 and the R script stop if the taxonomy has more ranks than `TAXONOMY_RANKS`
+  instead of silently shifting rank labels.
+- **Old bash.** The scripts run on bash 3.2+ (tested on 4.3.48 and 5.2). Arrays that may be
+  empty are expanded so that bash < 4.4 does not fail with "unbound variable".
 
 ---
 
@@ -159,6 +181,10 @@ trunc_len_f + trunc_len_r  ≥  amplicon length after primer removal + 12
 Example for 16S V4–V5 (515F/926R): the amplicon is about 411 bp, or about 372 nt after
 primer removal (MH reports a median merged length of 372 nt). So `240 + 160 = 400 ≥ 384`
 works.
+
+For **18S V4**, amplicon length varies across eukaryote groups. If the truncation lengths
+are too short for the longer amplicons, those reads fail to merge and their taxa vanish
+without an error. Check the *merged* column per sample in `denoising_stats.qzv`.
 
 For **ITS**, amplicon length varies a lot. Use `trunc_len 0` for both reads and rely on
 `max_ee` (general DADA2 practice for ITS, not taken from the sources).
@@ -234,6 +260,20 @@ recommended by MH or by QIIME 2.
 | 2024.5 – 2026.1 | 1.4.2 | QIIME 2 builds linked from `MH_2026.3-workflow`: `https://data.qiime2.org/classifiers/sklearn-1.4.2/silva/silva-138-99-nb-classifier.qza`, `.../greengenes2/2024.09.backbone.full-length.nb.sklearn-1.4.2.qza`, `.../gtdb/gtdb_classifier_r220.qza`, plus diverse- and human-stool-**weighted** SILVA/GTDB builds |
 | 2026.4 – 2026.7 | 1.7.1 | QIIME 2 now points to external hosts: **SILVA** at <https://www.arb-silva.de/documentation/classifiers/qiime-2>, **GTDB** at Zenodo [10.5281/zenodo.19446101](https://doi.org/10.5281/zenodo.19446101). Or train your own with RESCRIPt `[gut_to_soil_tutorial]`. |
 
+- **PR2 (18S), stage 05a.** With `BUILD_PR2_CLASSIFIER=yes` (set by the 18S_PR2 preset),
+  `05a_build_pr2_classifier.sh` trains a classifier in your own QIIME 2 environment, so the
+  scikit-learn version always matches. It runs `rescript get-pr2-data --p-version 5.1.1`
+  → `rescript dereplicate --p-mode uniq --p-rank-handles disable` →
+  `feature-classifier fit-classifier-naive-bayes`, on the full-length reference.
+  `--p-rank-handles disable` matters: RESCRIPt otherwise backfills missing ranks with its
+  default 7 NCBI-style prefixes. Training on all of PR2 needs a large-memory node.
+  - RESCRIPt labels the 9 PR2 ranks `d__ sgr__ dv__ dvs__ c__ o__ f__ g__ s__`; set
+    `TAXONOMY_RANKS` to the 9 names (the preset does). PR2 fills unknown ranks with
+    placeholders such as `g__Trichostomatia_XX`, so some "genera" are not real genera.
+  - Choose `TAXA_COLLAPSE_LEVEL` by rank number: 1 domain, 2 supergroup, 3 division,
+    4 subdivision, 5 class, 6 order, 7 family, **8 genus**, 9 species. Short V4 reads often
+    fail the 0.7 confidence at species level, so check in `rep_seqs_taxonomy.qzv` how many
+    reads reach the rank you choose.
 - Prefer an **environment-weighted** classifier when one matches your sample type
   `[conceptual_overview]` `[moving_pictures_tutorial]`.
 - Other references: UNITE (ITS), PR2 (18S), HOMD (oral), MitoFish (12S) `[MH_2026.3-workflow]`.
@@ -257,8 +297,12 @@ classifier for the marker, wrong orientation, or off-target amplification.
    case-insensitive substring (verified). **Keep unclassified ASVs by default**: a high
    fraction is informative `[MH_*]`. Check the labels your reference uses. SILVA uses
    *Mitochondria* (family) and *Chloroplast* (order). GTDB has no organelle sequences, so
-   the filter matches nothing and organelle reads may be classified elsewhere. For
-   18S/ITS, set `TAXA_EXCLUDE=""` or exclude host lineages instead.
+   the filter matches nothing and organelle reads may be classified elsewhere.
+   **PR2 / 18S** (preset): `d__Bacteria,d__Archaea,:plas,:mito,:apic,:chro`. PR2 5.1.1 tags
+   organelle sequences with `:plas`, `:mito`, `:apic`, `:chro`, plus `:nucl` (nucleomorph),
+   which you can add; this was checked in the 5.1.1 taxonomy file. Match prokaryotes on the
+   domain label: a bare `Bacteria` would also remove the diatom genus *Bacteriastrum*. For
+   ITS, set `TAXA_EXCLUDE=""` or exclude host lineages.
 2. **Rarefaction curves** up to the median depth `[moving_pictures_tutorial]`
    `[gut_to_soil_tutorial]`, drawn twice: grouped by metadata and per sample
    `[MH_qiime2-amplicon-2024.5 §6]`. MH notes that QIIME 2 shows only grouped curves when
@@ -322,8 +366,9 @@ Statistics:
 - `taxa barplot` on the ASV table `[all]`. Also a per-group summed barplot through
   `feature-table group --p-mode sum` `[MH_qiime2-amplicon-2024.5 §7]`; use it for
   overview figures only.
-- **ANCOM-BC2** on **unrarefied** counts, at ASV level and at genus level (`taxa collapse`)
-  `[gut_to_soil_tutorial]`. Use `DA_SAMPLE_FILTER` (an SQL `where` clause) to keep only the
+- **ANCOM-BC2** on **unrarefied** counts, at ASV level and at the rank set by
+  `TAXA_COLLAPSE_LEVEL` (`taxa collapse`; outputs are named after the rank, e.g.
+  `ancombc2_genus.qza`) `[gut_to_soil_tutorial]`. Use `DA_SAMPLE_FILTER` (an SQL `where` clause) to keep only the
   groups you compare, and `DA_REFERENCE` (e.g. `treatment::control`) to set the
   reference level.
 - The visualizer is `composition da-barplot` on 2026.4+ and
@@ -349,15 +394,16 @@ Follows `[MH_2026.3-R]`, with the defects listed in the comparison (E8–E15) fi
 
 | Part | What it does | Change from MH-R |
 |---|---|---|
-| Import | Reads the stage-10 TSVs. Matches samples by **ID** and reports mismatches. Keeps rank names. Prunes the SEPP reference tips from the tree. | MH-R used hard-coded column indices and got `ta1…ta7` rank names |
+| Settings | Reads `analysis_settings.tsv` (ranks, DA rank, overview rank, sampling depth, group, reference, seed) and prints/saves what it used | MH-R hard-coded ranks and depth |
+| Import | Reads the stage-10 TSVs. Matches samples by **ID** and reports mismatches. Keeps rank names, treats empty labels with any lowercase prefix (`g__`, `sgr__`, `dvs__`) as unassigned, and **stops** if the taxonomy is deeper than the configured ranks. Prunes the SEPP reference tips from the tree. | MH-R used hard-coded column indices and got `ta1…ta7` rank names |
 | QC | Library sizes and `vegan::rarecurve` with the rarefaction depth marked | — |
 | Alpha | Observed, Shannon, inverse Simpson: **median of 100 rarefactions**; Wilcoxon or Kruskal–Wallis with BH correction | MH-R used one rarefaction and no test |
 | Beta | Bray–Curtis (proportions), **robust Aitchison** (counts), Jaccard and unweighted UniFrac (rarefied), weighted UniFrac (proportions); `adonis2(by = "margin")` **+ `betadisper`**; PCoA, with ellipses only for categorical groups | MH-R had no dispersion test, put presence/absence metrics on unrarefied data, and drew ellipses on a continuous variable |
 | Composition | Phylum- and genus-level stacked bars of the top 15 taxa + "Other" + "Unassigned" (grey) | MH-R's bars didn't sum to 100% |
-| DA | Genus level, prevalence ≥10%, **same unrarefied counts** for ANCOM-BC2, ALDEx2 (Wilcoxon or KW) and MaAsLin3 (TSS/LOG + log-depth covariate). BH q ≤ 0.10. Consensus = significant in ≥2 methods **with the same direction**. | MH-R gave MaAsLin3 rarefied input, loaded the wrong MaAsLin package, and didn't check direction |
+| DA | Genus level, prevalence ≥10%, **same unrarefied counts** for ANCOM-BC2, ALDEx2 (Wilcoxon or KW) and MaAsLin3 (TSS/LOG + log-depth covariate). BH q ≤ 0.10. Consensus = significant in ≥2 methods **with the same direction**. ALDEx2's effect sign is aligned to the reference level, since it orders groups alphabetically. | MH-R gave MaAsLin3 rarefied input, loaded the wrong MaAsLin package, and didn't check direction |
 
-Set `cfg$covariates` (e.g. `c("site")`) and `cfg$group_ref` at the top of the script for
-adjusted models.
+The reference level comes from `DA_REFERENCE` (e.g. `treatment::control`). Set
+`cfg$covariates` (e.g. `c("site")`) at the top of the script for adjusted models.
 
 ---
 
@@ -381,8 +427,10 @@ Report these in the methods section:
 | Component | How it was checked | Result |
 |---|---|---|
 | Every `qiime` command and parameter | Read against plugin source at tags 2026.1.0 / 2026.4.0 / 2026.7.0 (and 2024.5.0 where relevant) | Names, defaults and outputs match |
-| Bash control flow (all 10 stages) | `shellcheck` (clean) plus dry runs with stub `qiime`/`biom` commands on five configurations: Illumina PE 16S DADA2 (2026.7); Deblur 18S (2026.1); PacBio ITS + kmer; Illumina single-end; no primers | All stages complete. Checkpoints stop as intended. Re-runs are idempotent. Version switches behave correctly. |
-| R script | Run end to end (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: a 2-group design, and a 3-group design with a covariate | Consensus recovered exactly the 6 true genera in both designs. ALDEx2 alone made 2–4 false calls, which the consensus removed. |
+| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on seven configurations (Illumina PE 16S DADA2 2026.7; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own overrides**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. |
+| Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
+| R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |
+| PR2 facts | RESCRIPt 2026.7.0 source (`get-pr2-data`, `dereplicate`); the PR2 5.1.1 taxonomy file (240,201 sequences) | 9 prefixed ranks; organelle tags `:plas :mito :apic :chro :nucl`; *Bacteriastrum* present |
 | End-to-end on real data with QIIME 2 | **Not done.** QIIME 2 packages could not be installed where this was written. | Run the pipeline on a small dataset (e.g. the gut-to-soil tutorial data) before production use. |
 
 Re-run the checks with `bash tests/smoke_test.sh <new-dir>` (no QIIME 2 needed) and

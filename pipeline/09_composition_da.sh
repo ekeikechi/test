@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Stage 09: taxonomic composition and differential abundance.
 #   Barplots    : taxa barplot (+ per-group sums)   [all sources] [MH_qiime2-amplicon-2024.5 §7]
-#   Diff. abund.: ANCOM-BC2 on ASVs and on genera   [gut_to_soil_tutorial]
+#   Diff. abund.: ANCOM-BC2 on ASVs and at TAXA_COLLAPSE_LEVEL [gut_to_soil_tutorial]
 #                 (classic ANCOM [MH_*] and ANCOM-BC [moving_pictures_tutorial] are older
 #                 methods; ANCOM-BC2 adds bias correction, random effects and a
 #                 pseudo-count sensitivity analysis)
 # DA runs on counts that were NOT rarefied (table_final), as ANCOM-BC2 expects.
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/09_composition_da"; mkdir -p "$D"
+show_settings "$D" \
+    Q2_EPOCH GROUP_COL DA_SAMPLE_FILTER DA_REFERENCE TAXONOMY_RANKS \
+    TAXA_COLLAPSE_LEVEL NCORES
 TABLE="${OUT}/06_filter_taxa_samples/table_final.qza"
 TAX="${OUT}/05_taxonomy/taxonomy.qza"
 
@@ -46,11 +49,14 @@ if [[ -n "$DA_SAMPLE_FILTER" ]]; then
     DA_TABLE="$D/table_da.qza"
 fi
 
-have "$D/table_da_genus.qza" || run qiime taxa collapse \
+# Collapsed-table DA at the configured rank (number in TAXONOMY_RANKS; R uses the same).
+RANK="$(rank_name "$TAXA_COLLAPSE_LEVEL" | tr '[:upper:]' '[:lower:]')"
+log "Collapsing to taxonomy level ${TAXA_COLLAPSE_LEVEL} (${RANK}) of: ${TAXONOMY_RANKS}"
+have "$D/table_da_${RANK}.qza" || run qiime taxa collapse \
     --i-table "$DA_TABLE" \
     --i-taxonomy "$TAX" \
     --p-level "$TAXA_COLLAPSE_LEVEL" \
-    --o-collapsed-table "$D/table_da_genus.qza"
+    --o-collapsed-table "$D/table_da_${RANK}.qza"
 
 ref_args=()
 [[ -n "$DA_REFERENCE" ]] && ref_args=(--p-reference-levels "$DA_REFERENCE")
@@ -58,18 +64,18 @@ ref_args=()
 # Visualizer name changed: 2026.1 has ancombc2-visualizer; 2026.4+ uses da-barplot.
 if epoch_ge 2026.4; then VIZ=da-barplot; else VIZ=ancombc2-visualizer; fi
 
-for level in asv genus; do
-    if [[ "$level" == "asv" ]]; then t="$DA_TABLE"; tax_args=(--i-taxonomy "$TAX"); else t="$D/table_da_genus.qza"; tax_args=(); fi
+for level in asv "$RANK"; do
+    if [[ "$level" == "asv" ]]; then t="$DA_TABLE"; tax_args=(--i-taxonomy "$TAX"); else t="$D/table_da_${RANK}.qza"; tax_args=(); fi
     have "$D/ancombc2_${level}.qza" || run qiime composition ancombc2 \
         --i-table "$t" \
         --m-metadata-file "$METADATA" \
         --p-fixed-effects-formula "$GROUP_COL" \
-        "${ref_args[@]}" \
+        ${ref_args[@]+"${ref_args[@]}"} \
         --p-num-processes "$NCORES" \
         --o-ancombc2-output "$D/ancombc2_${level}.qza"
     have "$D/ancombc2_${level}.qzv" || run qiime composition "$VIZ" \
         --i-data "$D/ancombc2_${level}.qza" \
-        "${tax_args[@]}" \
+        ${tax_args[@]+"${tax_args[@]}"} \
         --o-visualization "$D/ancombc2_${level}.qzv"
     have "$D/ancombc2_${level}_table.qzv" || run qiime composition tabulate \
         --i-data "$D/ancombc2_${level}.qza" \

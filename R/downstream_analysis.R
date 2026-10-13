@@ -3,8 +3,12 @@
 # Downstream statistics and figures for the combined amplicon SOP (stage 11).
 #
 # Inputs : the plain-text exports written by pipeline/10_export_provenance.sh
-#          (feature-table.tsv, taxonomy.tsv, metadata.tsv, optional tree.nwk)
+#          (feature-table.tsv, taxonomy.tsv, metadata.tsv, optional tree.nwk) and
+#          analysis_settings.tsv, which carries TAXONOMY_RANKS, TAXA_COLLAPSE_LEVEL,
+#          OVERVIEW_RANK_LEVEL, SAMPLING_DEPTH, GROUP_COL, DA_REFERENCE and RANDOM_SEED
+#          from pipeline/config.sh.
 # Usage  : Rscript R/downstream_analysis.R [export_dir] [out_dir] [group_column]
+#          (group_column overrides GROUP_COL from the settings file)
 #
 # Structure follows [MH_2026.3-R] (phyloseq import, QC, alpha/beta diversity,
 # composition plots, multi-tool differential abundance), with the fixes listed in
@@ -29,23 +33,78 @@ args <- commandArgs(trailingOnly = TRUE)
 cfg <- list(
   export_dir     = if (length(args) >= 1) args[[1]] else "results/10_export",
   out_dir        = if (length(args) >= 2) args[[2]] else "results/11_R",
-  group          = if (length(args) >= 3) args[[3]] else "treatment",
-  group_ref      = NULL,        # reference level of `group`; NULL = first level alphabetically
+  group          = if (length(args) >= 3) args[[3]] else NULL,  # else GROUP_COL from settings
+  group_ref      = NULL,        # from DA_REFERENCE ("column::level"); NULL = first level alphabetically
   covariates     = character(0),# extra adjustment terms, e.g. c("site")
+  # Defaults below apply only when analysis_settings.tsv (written by stage 10) is absent.
   ranks          = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"),
-  rarefy_depth   = NULL,        # NULL = smallest library size (match SAMPLING_DEPTH if you prefer)
+  collapse_level = 6,           # TAXA_COLLAPSE_LEVEL: rank number used for DA
+  overview_level = 2,           # OVERVIEW_RANK_LEVEL: rank number for overview barplots
+  rarefy_depth   = NULL,        # SAMPLING_DEPTH; NULL = smallest library size
   rarefy_iter    = 100,         # iterations averaged for alpha diversity
-  seed           = 711,         # [MH_2026.3-R]
+  seed           = 711,         # RANDOM_SEED [MH_2026.3-R]
   permutations   = 999,
   top_n          = 15,          # taxa shown in barplots; the rest are pooled as "Other"
-  da_rank        = "Genus",
   da_prevalence  = 0.10,        # keep taxa present in >= 10% of samples for DA
   da_q           = 0.10,        # FDR threshold used for every DA method [MH_2026.3-R]
   da_min_methods = 2            # consensus: significant in >= 2 methods [MH_2026.3-R]
 )
+say <- function(...) message(sprintf(...))
+
+# Shared settings from pipeline/config.sh, handed over by stage 10. This makes
+# config.sh the single source for ranks, DA rank, sampling depth, group, reference
+# and seed, so QIIME 2 and R cannot silently disagree.
+src <- setNames(rep("script default", 7),
+                c("ranks", "collapse_level", "overview_level", "rarefy_depth", "seed",
+                  "group", "group_ref"))
+if (!is.null(cfg$group)) src[["group"]] <- "command line"
+settings_path <- file.path(cfg$export_dir, "analysis_settings.tsv")
+if (file.exists(settings_path)) {
+  st <- read.delim(settings_path, colClasses = "character", quote = "",
+                   na.strings = character(0))
+  st <- setNames(st$value, st$setting)
+  get <- function(k) if (k %in% names(st) && nzchar(st[[k]])) st[[k]] else NULL
+  from_file <- function(field, value) { src[[field]] <<- "analysis_settings.tsv"; value }
+  if (!is.null(v <- get("taxonomy_ranks")))
+    cfg$ranks <- from_file("ranks", strsplit(v, "\\s+")[[1]])
+  if (!is.null(v <- get("collapse_level"))) cfg$collapse_level <- from_file("collapse_level", as.integer(v))
+  if (!is.null(v <- get("overview_level"))) cfg$overview_level <- from_file("overview_level", as.integer(v))
+  if (!is.null(v <- get("sampling_depth"))) cfg$rarefy_depth <- from_file("rarefy_depth", as.integer(v))
+  if (!is.null(v <- get("random_seed")))    cfg$seed <- from_file("seed", as.integer(v))
+  if (is.null(cfg$group) && !is.null(v <- get("group_col"))) cfg$group <- from_file("group", v)
+  if (!is.null(v <- get("da_reference")) && !is.null(cfg$group)) {
+    # DA_REFERENCE may hold several "column::level" items separated by spaces
+    hit <- grep(paste0("^", cfg$group, "::"), strsplit(v, "\\s+")[[1]], value = TRUE)
+    if (length(hit)) cfg$group_ref <- from_file("group_ref", sub("^[^:]*::", "", hit[1]))
+  }
+} else {
+  say("No analysis_settings.tsv in %s; using the defaults in this script.", cfg$export_dir)
+}
+if (is.null(cfg$group)) cfg$group <- "treatment"
+for (lv_name in c("collapse_level", "overview_level"))
+  if (cfg[[lv_name]] < 1 || cfg[[lv_name]] > length(cfg$ranks))
+    stop(sprintf("%s = %d but only %d ranks are defined: %s", lv_name, cfg[[lv_name]],
+                 length(cfg$ranks), paste(cfg$ranks, collapse = " ")))
+cfg$da_rank       <- cfg$ranks[cfg$collapse_level]
+cfg$overview_rank <- cfg$ranks[cfg$overview_level]
+
 dir.create(cfg$out_dir, showWarnings = FALSE, recursive = TRUE)
 out <- function(...) file.path(cfg$out_dir, ...)
-say <- function(...) message(sprintf(...))
+
+# Report the settings actually used, with their source.
+used <- data.frame(
+  setting = c("ranks", "collapse_level (DA rank)", "overview_level", "rarefy_depth", "seed",
+              "group", "group_ref"),
+  value = c(paste(cfg$ranks, collapse = " "),
+            sprintf("%d (%s)", cfg$collapse_level, cfg$da_rank),
+            sprintf("%d (%s)", cfg$overview_level, cfg$overview_rank),
+            if (is.null(cfg$rarefy_depth)) "smallest library" else cfg$rarefy_depth,
+            cfg$seed, cfg$group,
+            if (is.null(cfg$group_ref)) "first level alphabetically" else cfg$group_ref),
+  source = unname(src))
+write.csv(used, out("settings_used.csv"), row.names = FALSE)
+message("Settings used by downstream_analysis.R:")
+message(paste(sprintf("  %-26s = %-45s (%s)", used$setting, used$value, used$source), collapse = "\n"))
 set.seed(cfg$seed)
 
 # ---- 1. Import ---------------------------------------------------------------
@@ -75,9 +134,16 @@ read_feature_table <- function(path) {
 read_taxonomy <- function(path, ranks) {
   tx <- read.delim(path, check.names = FALSE, comment.char = "", stringsAsFactors = FALSE)
   split <- strsplit(tx$Taxon, ";\\s*")
+  depth <- max(lengths(split))
+  # Never truncate: a deeper taxonomy than `ranks` would shift every rank label [review #2].
+  if (depth > length(ranks))
+    stop(sprintf(paste("taxonomy.tsv has up to %d ranks but only %d rank names are configured",
+                       "(%s). Set TAXONOMY_RANKS in pipeline/config.sh to match your reference."),
+                 depth, length(ranks), paste(ranks, collapse = " ")))
   m <- t(vapply(split, function(x) {
     x <- trimws(x)
-    x[grepl("^[a-z]__$", x) | x %in% c("", "Unassigned")] <- NA  # empty rank labels
+    # empty rank labels such as "g__", "sgr__", "dvs__" (any lowercase prefix)
+    x[grepl("^[a-z]+__$", x) | x %in% c("", "Unassigned")] <- NA
     length(x) <- length(ranks)
     x
   }, character(length(ranks))))
@@ -244,7 +310,7 @@ plot_composition <- function(rank) {
            labs(x = NULL, y = "Relative abundance", fill = rank) +
            theme_bw() + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, size = 6)))
 }
-invisible(lapply(c("Phylum", cfg$da_rank), plot_composition))
+invisible(lapply(unique(c(cfg$overview_rank, cfg$da_rank)), plot_composition))
 
 # ---- 6. Differential abundance: ANCOM-BC2 + ALDEx2 + MaAsLin3 consensus -----
 
@@ -271,8 +337,12 @@ if (requireNamespace("ALDEx2", quietly = TRUE)) {
   if (two_groups) {
     tt <- ALDEx2::aldex.ttest(clr)
     ef <- ALDEx2::aldex.effect(clr, verbose = FALSE)
-    # aldex effect is (2nd level - 1st level) of the sorted condition labels
-    da$ALDEx2 <- data.frame(feature = rownames(tt), q = tt$wi.eBH, effect = ef$effect)
+    # ALDEx2 orders the condition labels alphabetically: effect = (2nd - 1st) of sort(lv).
+    # ANCOM-BC2 and MaAsLin3 report (other level - reference), with lv[1] the reference,
+    # so flip ALDEx2's sign when the reference is not alphabetically first.
+    aldex_sign <- if (identical(lv[1], sort(lv)[1])) 1 else -1
+    da$ALDEx2 <- data.frame(feature = rownames(tt), q = tt$wi.eBH,
+                            effect = aldex_sign * ef$effect)
   } else {
     kw <- ALDEx2::aldex.kw(clr)
     da$ALDEx2 <- data.frame(feature = rownames(kw), q = kw$kw.eBH, effect = NA_real_)

@@ -8,6 +8,9 @@
 #            because PERMANOVA is sensitive to unequal dispersion; adonis for multi-factor.
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/08_diversity"; mkdir -p "$D"
+show_settings "$D" \
+    Q2_EPOCH SAMPLING_DEPTH BOOTS_N RANDOM_SEED RUN_KMER_DIVERSITY GROUP_COL \
+    ADONIS_FORMULA NCORES
 TREE="${OUT}/07_phylogeny/tree.qza"
 
 need SAMPLING_DEPTH "Choose it in 06_filter_taxa_samples/table_final_summary.qzv (Interactive Sample Detail)."
@@ -27,14 +30,14 @@ if ! have "$D/core/alpha"; then
     mkdir -p "$D/core"
     run qiime boots core-metrics \
         --i-table "$TABLE" \
-        "${phylo_args[@]}" \
+        ${phylo_args[@]+"${phylo_args[@]}"} \
         --m-metadata-file "$METADATA" \
         --p-sampling-depth "$SAMPLING_DEPTH" \
         --p-n "$BOOTS_N" \
         --p-no-replacement \
         --p-alpha-average-method median \
         --p-beta-average-method medoid \
-        "${seed_args[@]}" \
+        ${seed_args[@]+"${seed_args[@]}"} \
         --o-resampled-tables "$D/core/resampled_tables" \
         --o-alpha-diversities "$D/core/alpha" \
         --o-distance-matrices "$D/core/distance" \
@@ -102,7 +105,7 @@ if [[ "$RUN_KMER_DIVERSITY" == "yes" ]] && ! have "$D/kmer/scatter_plot.qzv"; th
         --p-sampling-depth "$SAMPLING_DEPTH" \
         --p-n "$BOOTS_N" \
         --p-no-replacement \
-        "${seed_args[@]}" \
+        ${seed_args[@]+"${seed_args[@]}"} \
         --o-resampled-tables "$D/kmer/resampled_tables" \
         --o-kmer-tables "$D/kmer/kmer_tables" \
         --o-alpha-diversities "$D/kmer/alpha" \

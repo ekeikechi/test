@@ -8,6 +8,8 @@
 #   ITS / other : no tree; use non-phylogenetic or kmer-based metrics [gut_to_soil_tutorial]
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/07_phylogeny"; mkdir -p "$D"
+show_settings "$D" \
+    MARKER TREE_METHOD SEPP_REF NCORES
 TABLE="${OUT}/06_filter_taxa_samples/table_final.qza"
 SEQS="${OUT}/06_filter_taxa_samples/rep_seqs_final.qza"
 

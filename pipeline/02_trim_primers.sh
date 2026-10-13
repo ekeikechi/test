@@ -5,6 +5,8 @@
 # PacBio primers are removed inside dada2 denoise-ccs (stage 03).
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/02_trim"; mkdir -p "$D"
+show_settings "$D" \
+    PLATFORM LAYOUT MARKER PRIMER_F PRIMER_R NCORES
 IN="${OUT}/01_import/reads.qza"
 
 if [[ "$PLATFORM" == "pacbio" ]]; then

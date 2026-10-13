@@ -5,6 +5,8 @@
 #          [MH_qiime2-amplicon-2024.5 §6: per-sample and per-group rarefaction curves]
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/06_filter_taxa_samples"; mkdir -p "$D"
+show_settings "$D" \
+    MARKER TAXA_EXCLUDE TAXA_INCLUDE MIN_SAMPLE_DEPTH
 TABLE="${OUT}/04_filter_features/table.qza"
 SEQS="${OUT}/04_filter_features/rep_seqs.qza"
 TAX="${OUT}/05_taxonomy/taxonomy.qza"

@@ -6,6 +6,8 @@
 #   filter before classifying                     [gut_to_soil_tutorial] [conceptual_overview]
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/04_filter_features"; mkdir -p "$D"
+show_settings "$D" \
+    MIN_SAMPLES MIN_FREQ_FRACTION
 IN_TABLE="${OUT}/03_denoise/table.qza"
 IN_SEQS="${OUT}/03_denoise/rep_seqs.qza"
 

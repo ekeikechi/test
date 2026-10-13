@@ -7,7 +7,18 @@
 # stage; the stage that needs the value stops and names the .qzv to inspect.
 #
 # Source labels in brackets refer to docs/01-workflow-comparison.md, section 1.
+#
+# Every stage prints the settings it used at the start of its log, each tagged
+# (config), (preset ...) or (yours; preset ... would set ...), and saves the same
+# list to results/<stage>/settings_used.tsv.
 # -----------------------------------------------------------------------------
+
+# ---- Preset -----------------------------------------------------------------
+# ""        : the generic defaults below (written for Illumina 16S)
+# "18S_PR2" : 18S V4 + PR2 defaults; see the preset block at the end of this file.
+#             A preset only changes settings you left at the value shipped here;
+#             anything you edited yourself is kept.
+PRESET=""
 
 # ---- Environment ------------------------------------------------------------
 # QIIME 2 release this project runs on. Supported here: 2026.1, 2026.4, 2026.7.
@@ -75,8 +86,17 @@ MIN_FREQ_FRACTION="0.001"                 # keep ASVs with total count >= fracti
                                           # set to 0 to disable the frequency rule
 
 # ---- 05 Taxonomy ------------------------------------------------------------
-# MUST match the scikit-learn version of your QIIME 2 release (see SOP, stage 5).
-CLASSIFIER=""                             # path to a pre-trained classifier .qza
+# Rank names of your reference taxonomy, in order. This is the single place ranks are
+# defined: QIIME 2 collapses by number, R looks the name up here (via the stage-10 export).
+TAXONOMY_RANKS="Domain Phylum Class Order Family Genus Species"   # SILVA / GTDB / Greengenes2
+OVERVIEW_RANK_LEVEL=2                     # rank for overview barplots (2 = Phylum here)
+# Stage 05a can train a PR2 classifier with RESCRIPt, which also guarantees the
+# scikit-learn version matches this QIIME 2 release.
+BUILD_PR2_CLASSIFIER="no"                 # yes = run 05a_build_pr2_classifier.sh
+PR2_VERSION="5.1.1"                       # 5.1.1 | 5.1.0 | 5.0.0 (rescript get-pr2-data)
+# A pre-trained classifier MUST match the scikit-learn version of your QIIME 2
+# release (see SOP, stage 5).
+CLASSIFIER=""                             # path to a classifier .qza
 CLASSIFIER_LABEL="reference"              # short name shown in tabulate-seqs, e.g. "SILVA138"
 CLASSIFY_CONFIDENCE="0.7"
 
@@ -96,4 +116,36 @@ BOOTS_N=100                               # resampling iterations [gut_to_soil_t
 RUN_KMER_DIVERSITY="no"                   # yes = also run tree-free kmer-diversity [gut_to_soil_tutorial]
 
 # ---- 09 Composition / differential abundance --------------------------------
-TAXA_COLLAPSE_LEVEL=6                     # 6 = genus for 7-rank taxonomies
+# Rank number (1-based, in TAXONOMY_RANKS) for collapsed-table differential abundance,
+# used by QIIME 2 (taxa collapse) and R alike. 6 = Genus for the 7 ranks above.
+TAXA_COLLAPSE_LEVEL=6
+
+# =============================================================================
+# Preset block. Format:  preset VARIABLE "value shipped above" "preset value"
+# The middle argument must match the value shipped above (tests/smoke_test.sh checks
+# this); if you changed the variable, your value is kept and the logs say so.
+# =============================================================================
+if [[ "$PRESET" == "18S_PR2" ]]; then
+    preset MARKER               "16S"   "18S"
+    preset PRIMER_F             "GTGYCAGCMGCCGCGGTAA"  "CYGCGGTAATTCCAGCTC"     # 18S V4
+    preset PRIMER_R             "CCGYCAATTYMTTTRAGTTT" "AYGGTATCTRATCRTCTTYG"
+    preset DADA2_POOLING        "independent" "pseudo"   # helps rare ASVs seen in several samples
+    preset TREE_METHOD          "auto"  "none"            # no reliable tree across all eukaryotes
+    preset RUN_KMER_DIVERSITY   "no"    "yes"             # tree-free relatedness-aware metrics
+    preset MIN_SAMPLES          "2"     "1"               # keep taxa found at a single site
+    # Rare-ASV frequency rule: keep ONE of the next two lines active.
+    preset MIN_FREQ_FRACTION    "0.001" "0.001"           # keep the 0.1% rule
+    # preset MIN_FREQ_FRACTION  "0.001" "0"               # drop the 0.1% rule
+    preset TAXONOMY_RANKS       "Domain Phylum Class Order Family Genus Species" \
+                                "Domain Supergroup Division Subdivision Class Order Family Genus Species"
+    preset OVERVIEW_RANK_LEVEL  "2"     "3"               # Division
+    preset TAXA_COLLAPSE_LEVEL  "6"     "8"               # Genus (9 = Species, 7 = Family, ...)
+    preset BUILD_PR2_CLASSIFIER "no"    "yes"
+    preset CLASSIFIER           ""      "${OUT}/05a_pr2_classifier/pr2_${PR2_VERSION}_classifier.qza"
+    preset CLASSIFIER_LABEL     "reference" "PR2_${PR2_VERSION}"
+    # Prokaryotes are matched on the domain label so the diatom genus Bacteriastrum is kept;
+    # organelle tags are PR2's (:plas plastid, :mito, :apic apicoplast, :chro chromatophore).
+    # PR2 also tags nucleomorphs (:nucl); add ",:nucl" to drop them too.
+    preset TAXA_EXCLUDE         "mitochondria,chloroplast" \
+                                "d__Bacteria,d__Archaea,:plas,:mito,:apic,:chro"
+fi

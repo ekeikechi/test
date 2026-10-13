@@ -8,9 +8,9 @@ amplicon documentation, then combines them into one optimized, runnable workflow
 |---|---|
 | [`docs/01-workflow-comparison.md`](docs/01-workflow-comparison.md) | Step-by-step comparison of all eight sources: tools, parameters and defaults; what changed between MH 2024.5 and MH 2026.3 and across QIIME 2 releases; 20 errata with evidence; recommended resolutions |
 | [`docs/02-optimized-amplicon-sop.md`](docs/02-optimized-amplicon-sop.md) | The combined SOP: decisions and rationale, installation, eleven stages with checkpoints, reporting checklist, validation status. Every step cites its source label. |
-| [`pipeline/`](pipeline) | `config.sh` (all settings and decisions), `lib.sh`, and stage scripts `01_…10_` (QIIME 2 2026.7; 2026.1 supported) |
+| [`pipeline/`](pipeline) | `config.sh` (all settings and decisions, plus an `18S_PR2` preset), `lib.sh`, stage scripts `01_…10_` and optional `05a_build_pr2_classifier.sh` (QIIME 2 2026.7; 2026.1 supported; bash 3.2+) |
 | [`R/downstream_analysis.R`](R/downstream_analysis.R) | Stage 11: phyloseq/vegan diversity, composition plots, and an ANCOM-BC2 + ALDEx2 + MaAsLin3 differential-abundance consensus |
-| [`tests/`](tests) | `smoke_test.sh` (all pipeline branches against stub `qiime`/`biom`), `r_check.sh` (R script on synthetic data with known answers) |
+| [`tests/`](tests) | `smoke_test.sh` (7 pipeline configurations against stub `qiime`/`biom`, with assertions on commands, presets and settings reports), `r_check.sh` (R script on synthetic 16S and PR2 data with known answers, plus negative checks) |
 
 ## Sources (labels used throughout)
 
@@ -32,10 +32,10 @@ section 1 of the comparison.
 
 ```bash
 conda activate rachis-qiime2-2026.7          # see SOP §1 for installation
-$EDITOR pipeline/config.sh                   # paths, platform, marker, primers, metadata columns
+$EDITOR pipeline/config.sh                   # paths, metadata columns; PRESET="18S_PR2" for 18S V4 + PR2
 bash pipeline/01_import_qc.sh                # each stage stops at a checkpoint when it needs a decision
 # ... 02 to 10 ...
-Rscript R/downstream_analysis.R results/10_export results/11_R <group_column>
+Rscript R/downstream_analysis.R results/10_export results/11_R   # reads ranks, depth, group from stage 10
 ```
 
 ## Headline findings from the comparison
@@ -57,8 +57,8 @@ Rscript R/downstream_analysis.R results/10_export results/11_R <group_column>
 
 ## Validation status
 
-The bash pipeline was checked with `shellcheck` and dry-run through five configurations
-against command stubs. Every `qiime` command and parameter was read against the plugin source
+The bash pipeline was checked with `shellcheck` and dry-run through seven configurations
+against command stubs, on bash 5.2 and 4.3. Every `qiime` command and parameter was read against the plugin source
 at the matching release tags. The R script was run end to end on synthetic data, where it
 recovered exactly the known differentially abundant genera. **The pipeline has not been run
 on real data with QIIME 2 installed** (QIIME 2 packages were unreachable from the environment

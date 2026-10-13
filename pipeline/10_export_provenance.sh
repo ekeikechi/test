@@ -4,6 +4,9 @@
 #   Provenance : replay-provenance / replay-supplement   [gut_to_soil_tutorial: provenance replay]
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/10_export"; mkdir -p "$D"
+show_settings "$D" \
+    TAXONOMY_RANKS TAXA_COLLAPSE_LEVEL OVERVIEW_RANK_LEVEL SAMPLING_DEPTH GROUP_COL \
+    DA_REFERENCE RANDOM_SEED
 TABLE="${OUT}/06_filter_taxa_samples/table_final.qza"
 SEQS="${OUT}/06_filter_taxa_samples/rep_seqs_final.qza"
 TAX="${OUT}/05_taxonomy/taxonomy.qza"
@@ -43,6 +46,28 @@ if [[ -e "$TREE" ]]; then
     export_once "$TREE" tree
     cp "$X/tree/tree.nwk" "$D/tree.nwk"
 fi
+
+# The taxonomy must not be deeper than TAXONOMY_RANKS, or ranks would be mislabelled.
+DEPTH="$(awk -F'\t' 'NR > 1 { sub(/;[[:space:]]*$/, "", $2); n = split($2, a, ";"); if (n > m) m = n }
+                     END { print m + 0 }' "$D/taxonomy.tsv")"
+(( DEPTH <= $(rank_count) )) \
+    || die "taxonomy.tsv has up to ${DEPTH} ranks but TAXONOMY_RANKS lists $(rank_count): ${TAXONOMY_RANKS}"
+(( DEPTH == $(rank_count) )) \
+    || log "Note: the deepest assignment has ${DEPTH} of $(rank_count) ranks (fine if no ASV reached the last rank)."
+
+# Single hand-off of shared settings to R (R/downstream_analysis.R reads this file),
+# so QIIME 2 and R analyse the same rank, depth, group, reference and seed.
+{
+    printf 'setting\tvalue\n'
+    printf 'preset\t%s\n'           "$PRESET"
+    printf 'taxonomy_ranks\t%s\n'   "$TAXONOMY_RANKS"
+    printf 'collapse_level\t%s\n'   "$TAXA_COLLAPSE_LEVEL"
+    printf 'overview_level\t%s\n'   "$OVERVIEW_RANK_LEVEL"
+    printf 'sampling_depth\t%s\n'   "$SAMPLING_DEPTH"
+    printf 'group_col\t%s\n'        "$GROUP_COL"
+    printf 'da_reference\t%s\n'     "$DA_REFERENCE"
+    printf 'random_seed\t%s\n'      "$RANDOM_SEED"
+} > "$D/analysis_settings.tsv"
 
 log "Provenance: a re-runnable script and a methods supplement (citations + script)"
 have "$D/replayed_commands.sh" || run qiime tools replay-provenance \
