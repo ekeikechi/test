@@ -28,6 +28,7 @@ else echo "FAIL  preset block out of sync with config.sh:"; echo "$mismatches"; 
 #      an item starting with "+" is appended as a line (the "Your overrides" section). ----
 BRANCHES=(
   'illumina16S_2026.7'
+  'illumina16S_2026.4|Q2_EPOCH="2026.4"'
   'deblur18S_2026.1|DENOISER="deblur"|MARKER="18S"|Q2_EPOCH="2026.1"'
   'pacbioITS|PLATFORM="pacbio"|MARKER="ITS"|IMPORT_MODE="manifest"|RUN_KMER_DIVERSITY="yes"'
   'illumina_single|LAYOUT="single"|IMPORT_MODE="manifest"|PRIMER_R=""'
@@ -68,6 +69,7 @@ for spec in "${BRANCHES[@]}"; do
         else sed -i "s|^${kv%%=*}=.*|${kv}|" "$cfg"; fi
     done
     export SMOKE_LOG="$B/calls.log"; : > "$SMOKE_LOG"
+    STUB_EPOCH="$(sed -n 's/^Q2_EPOCH="\(.*\)".*/\1/p' "$cfg")"; export STUB_EPOCH
     result="OK"
     for s in "${STAGES[@]}"; do
         if ! (cd "$B" && bash "pipeline/${s}.sh") > "$B/${s}.log" 2>&1; then
@@ -84,7 +86,13 @@ for spec in "${BRANCHES[@]}"; do
         illumina16S_2026.7)
             expect "$name" "collapse at level 6 (genus)" grep -q -- '--p-level 6 --o-collapsed-table .*table_da_genus.qza' "$SMOKE_LOG"
             expect "$name" "05a skipped (BUILD_PR2_CLASSIFIER=no)" bash -c "! grep -q 'rescript' '$SMOKE_LOG'"
-            expect "$name" "settings handed to R" grep -qx $'collapse_level\t6' "$B/results/10_export/analysis_settings.tsv" ;;
+            expect "$name" "settings handed to R" grep -qx $'collapse_level\t6' "$B/results/10_export/analysis_settings.tsv"
+            expect "$name" "cutadapt --o-stats, tabulated and exported (2026.7)" \
+                bash -c "grep -q -- '--o-stats .*02_trim/cutadapt_stats.qza' '$SMOKE_LOG' && grep -q -- 'tools export --input-path .*cutadapt_stats.qza' '$SMOKE_LOG'"
+            expect "$name" "da-barplot for ANCOM-BC2 (2026.7)" grep -q 'composition da-barplot' "$SMOKE_LOG" ;;
+        illumina16S_2026.4)
+            expect "$name" "no --o-stats before 2026.7" bash -c "! grep -q -- 'cutadapt_stats' '$SMOKE_LOG'"
+            expect "$name" "ancombc2-visualizer on 2026.4" bash -c "grep -q 'ancombc2-visualizer' '$SMOKE_LOG' && ! grep -q 'da-barplot' '$SMOKE_LOG'" ;;
         pr2_18S_preset)
             expect "$name" "PR2 classifier built (get-pr2-data, dereplicate --p-rank-handles disable, fit)" \
                 bash -c "grep -q 'rescript get-pr2-data --p-version 5.1.1' '$SMOKE_LOG' && grep -q -- '--p-rank-handles disable' '$SMOKE_LOG' && grep -q 'fit-classifier-naive-bayes' '$SMOKE_LOG'"

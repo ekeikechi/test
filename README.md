@@ -10,7 +10,7 @@ amplicon documentation, then combines them into one optimized, runnable workflow
 | [`docs/02-optimized-amplicon-sop.md`](docs/02-optimized-amplicon-sop.md) | The combined SOP: decisions and rationale, installation, eleven stages with checkpoints, reporting checklist, validation status. Every step cites its source label. |
 | [`pipeline/`](pipeline) | `config.sh` (all settings and decisions, plus an `18S_PR2` preset), `lib.sh`, stage scripts `01_…10_` and optional `05a_build_pr2_classifier.sh` (QIIME 2 2026.7; 2026.1 supported; bash 3.2+) |
 | [`R/downstream_analysis.R`](R/downstream_analysis.R) | Stage 11: phyloseq/vegan diversity, composition plots, and an ANCOM-BC2 + ALDEx2 + MaAsLin3 differential-abundance consensus |
-| [`tests/`](tests) | `smoke_test.sh` (8 pipeline configurations against stub `qiime`/`biom`, with assertions on commands, presets and settings reports), `r_check.sh` (R script on synthetic 16S and PR2 data with known answers, plus negative checks) |
+| [`tests/`](tests) | `smoke_test.sh` (9 pipeline configurations against stub `qiime`/`biom`, with assertions on commands, presets and settings reports; the stub rejects commands whose interface differs in the configured QIIME 2 release), `r_check.sh` (R script on synthetic 16S and PR2 data with known answers, plus negative checks) |
 
 ## Sources (labels used throughout)
 
@@ -57,9 +57,13 @@ Rscript R/downstream_analysis.R results/10_export results/11_R   # reads ranks, 
 
 ## Validation status
 
-The bash pipeline was checked with `shellcheck` and dry-run through eight configurations
+The bash pipeline was checked with `shellcheck` and dry-run through nine configurations
 against command stubs, on bash 5.2 and 4.3. Every `qiime` command and parameter was read against the plugin source
 at the matching release tags. The R script was run end to end on synthetic data, where it
-recovered exactly the known differentially abundant genera. **The pipeline has not been run
-on real data with QIIME 2 installed** (QIIME 2 packages were unreachable from the environment
-it was written in). Do a small test run before production use.
+recovered exactly the known differentially abundant genera. The first run on real data
+(QIIME 2 2026.7, 18S V4, 216 samples) completed stage 1. Stage 2 then stopped on an interface
+change missed in the source review: `cutadapt trim-paired` in 2026.7 requires `--o-stats`. A
+re-check of every plugin the pipeline calls, comparing 2026.4 with 2026.7, found one more:
+the ANCOM-BC2 visualizer, used in stage 9. Both are fixed, and the test stub now rejects both
+mistakes. Stages 3–11 have not yet run on real data, so do a small test run before
+production use.

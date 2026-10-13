@@ -238,10 +238,20 @@ qiime cutadapt trim-paired \
   --p-discard-untrimmed \
   --p-no-indels \
   --p-cores $NCORES \
+  --o-stats results/02_trim/cutadapt_stats.qza \
   --o-trimmed-sequences results/02_trim/reads_trimmed.qza
+# --o-stats is required from 2026.7 and does not exist before it (left out on 2026.1/2026.4)
 # single-end: qiime cutadapt trim-single with --p-front $PRIMER_F
 # PRIMER_F and PRIMER_R both empty: no trimming; reads.qza is linked as reads_trimmed.qza
 # PacBio: nothing runs here (primers are removed in stage 3)
+
+# 2026.7+: per-sample trimming statistics as a table and as a TSV
+qiime metadata tabulate \
+  --m-input-file results/02_trim/cutadapt_stats.qza \
+  --o-visualization results/02_trim/cutadapt_stats.qzv
+qiime tools export \
+  --input-path results/02_trim/cutadapt_stats.qza \
+  --output-path results/02_trim/cutadapt_stats
 
 qiime demux summarize \
   --i-data results/02_trim/reads_trimmed.qza \
@@ -252,12 +262,15 @@ With `PRESET="18S_PR2"`, `$PRIMER_F`/`$PRIMER_R` are `CYGCGGTAATTCCAGCTC` /
 `AYGGTATCTRATCRTCTTYG`.
 
 **Outputs** (`results/02_trim/`): `reads_trimmed.qza`, `reads_trimmed_summary.qzv`,
-`settings_used.tsv`.
+`settings_used.tsv`; on 2026.7+ also `cutadapt_stats.qza`, `cutadapt_stats.qzv` and
+`cutadapt_stats/metadata.tsv`.
 
 **Check**
 - Compare per-sample read counts in `reads_trimmed_summary.qzv` with
   `results/01_import/reads_summary.qzv`. Most reads should survive; a large loss almost
-  always means a wrong primer sequence `[MH_2026.3-workflow §2.3.2]`.
+  always means a wrong primer sequence `[MH_2026.3-workflow §2.3.2]`. On 2026.7+,
+  `cutadapt_stats.qzv` shows this per sample directly: the percentage of reads kept and
+  the percentage of R1 and R2 in which the primer was found.
 - Use the *Interactive Quality Plot* to choose `DADA2_TRUNC_F`/`DADA2_TRUNC_R` for stage 3.
   To get the per-position numbers as tables (`forward-seven-number-summaries.tsv` and
   `reverse-seven-number-summaries.tsv`), run:
@@ -804,8 +817,10 @@ and Jaccard. A tree adds Faith PD and weighted/unweighted UniFrac.
   `ancombc2_genus.qza`) `[gut_to_soil_tutorial]`. Use `DA_SAMPLE_FILTER` (an SQL `where` clause) to keep only the
   groups you compare, and `DA_REFERENCE` (e.g. `treatment::control`) to set the
   reference level.
-- The visualizer is `composition da-barplot` on 2026.4+ and
-  `composition ancombc2-visualizer` on 2026.1. The script switches on `Q2_EPOCH`.
+- The visualizer is `composition da-barplot` on 2026.7 and
+  `composition ancombc2-visualizer` on 2026.1 and 2026.4 (2026.7 removed
+  `ancombc2-visualizer`; before 2026.7, `da-barplot` accepts ANCOM-BC output only). The
+  script switches on `Q2_EPOCH`.
 - Classic ANCOM `[MH_*]` and ANCOM-BC `[moving_pictures_tutorial]` still exist. ANCOM-BC2
   adds bias correction, random effects and a pseudo-count sensitivity analysis.
 - **Treat hits as hypotheses** `[gut_to_soil_tutorial]`, and confirm them with the R
@@ -848,7 +863,7 @@ qiime composition da-barplot --i-data results/09_composition_da/ancombc2_asv.qza
 qiime composition tabulate --i-data results/09_composition_da/ancombc2_asv.qza \
   --o-visualization results/09_composition_da/ancombc2_asv_table.qzv
 # --p-reference-levels only if DA_REFERENCE is set; --i-taxonomy only for the ASV-level plot
-# QIIME 2 2026.1: qiime composition ancombc2-visualizer instead of da-barplot
+# QIIME 2 2026.1 and 2026.4: qiime composition ancombc2-visualizer instead of da-barplot
 ```
 
 **Outputs** (`results/09_composition_da/`): `taxa_barplot.qzv`,
@@ -963,7 +978,8 @@ Report these in the methods section:
 | Component | How it was checked | Result |
 |---|---|---|
 | Every `qiime` command and parameter | Read against plugin source at tags 2026.1.0 / 2026.4.0 / 2026.7.0 (and 2024.5.0 where relevant) | Names, defaults and outputs match |
-| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on eight configurations (Illumina PE 16S DADA2 2026.7; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. |
+| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on nine configurations (Illumina PE 16S DADA2 2026.7; the same on 2026.4; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. The stub rejects release-specific mistakes: `cutadapt trim-*` without `--o-stats` on 2026.7 (or with it before 2026.7), `ancombc2-visualizer` on 2026.7, and `da-barplot` on ANCOM-BC2 output before 2026.7. The previous pipeline version fails these checks in 6 of 9 configurations. |
+| First real-data run (2026.7, 18S V4, 216 samples) | Stages 1–2 on the user's server | Stage 1 completed. Stage 2 stopped: 2026.7 `cutadapt trim-paired` requires `--o-stats`. Fixed. A follow-up comparison of every plugin interface the pipeline calls (2026.4 vs 2026.7) found the stage 9 visualizer change too; also fixed. |
 | Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
 | R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |
 | PR2 facts | RESCRIPt 2026.7.0 source (`get-pr2-data`, `dereplicate`); the PR2 5.1.1 taxonomy file (240,201 sequences) | 9 prefixed ranks; organelle tags `:plas :mito :apic :chro :nucl`; *Bacteriastrum* present |

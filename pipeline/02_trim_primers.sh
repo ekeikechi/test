@@ -21,6 +21,9 @@ fi
 
 # --p-discard-untrimmed drops reads without the primer (off-target / primer dimers);
 # --p-no-indels matches MH practice for anchored primer sequences.
+# 2026.7+ also writes per-sample trimming statistics (--o-stats, a required output).
+stats_args=()
+epoch_ge 2026.7 && stats_args=(--o-stats "$D/cutadapt_stats.qza")
 if ! have "$D/reads_trimmed.qza"; then
     if [[ "$LAYOUT" == "paired" ]]; then
         run qiime cutadapt trim-paired \
@@ -30,6 +33,7 @@ if ! have "$D/reads_trimmed.qza"; then
             --p-discard-untrimmed \
             --p-no-indels \
             --p-cores "$NCORES" \
+            ${stats_args[@]+"${stats_args[@]}"} \
             --o-trimmed-sequences "$D/reads_trimmed.qza"
     else
         run qiime cutadapt trim-single \
@@ -38,8 +42,20 @@ if ! have "$D/reads_trimmed.qza"; then
             --p-discard-untrimmed \
             --p-no-indels \
             --p-cores "$NCORES" \
+            ${stats_args[@]+"${stats_args[@]}"} \
             --o-trimmed-sequences "$D/reads_trimmed.qza"
     fi
+fi
+
+# Per-sample read survival and % of R1/R2 with the primer found, as a viewable table
+# and as cutadapt_stats/metadata.tsv.
+if epoch_ge 2026.7; then
+    have "$D/cutadapt_stats.qzv" || run qiime metadata tabulate \
+        --m-input-file "$D/cutadapt_stats.qza" \
+        --o-visualization "$D/cutadapt_stats.qzv"
+    have "$D/cutadapt_stats/metadata.tsv" || run qiime tools export \
+        --input-path "$D/cutadapt_stats.qza" \
+        --output-path "$D/cutadapt_stats"
 fi
 
 have "$D/reads_trimmed_summary.qzv" || run qiime demux summarize \

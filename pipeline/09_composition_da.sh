@@ -61,8 +61,9 @@ have "$D/table_da_${RANK}.qza" || run qiime taxa collapse \
 ref_args=()
 [[ -n "$DA_REFERENCE" ]] && ref_args=(--p-reference-levels "$DA_REFERENCE")
 
-# Visualizer name changed: 2026.1 has ancombc2-visualizer; 2026.4+ uses da-barplot.
-if epoch_ge 2026.4; then VIZ=da-barplot; else VIZ=ancombc2-visualizer; fi
+# Visualizer for ANCOM-BC2 output: ancombc2-visualizer up to 2026.4; 2026.7 removed it
+# and extended da-barplot (which until then took ANCOM-BC output only) to ANCOM-BC2.
+if epoch_ge 2026.7; then VIZ=da-barplot; else VIZ=ancombc2-visualizer; fi
 
 for level in asv "$RANK"; do
     if [[ "$level" == "asv" ]]; then t="$DA_TABLE"; tax_args=(--i-taxonomy "$TAX"); else t="$D/table_da_${RANK}.qza"; tax_args=(); fi
