@@ -84,7 +84,13 @@ CCS_MAX_EE=18
 # ---- 04 Feature filtering ---------------------------------------------------
 MIN_SAMPLES=2                             # keep ASVs seen in >= N samples [gut_to_soil_tutorial]
 MIN_FREQ_FRACTION="0.001"                 # keep ASVs with total count >= fraction x mean depth [MH_*]
-                                          # set to 0 to disable the frequency rule
+# Turning the frequency rule off: use 0. Stage 04 then filters with --p-min-frequency 0,
+# so only MIN_SAMPLES still filters; with MIN_SAMPLES=1 (the 18S_PR2 preset) stage 04
+# removes nothing. With PRESET="18S_PR2" on, any of these works, and the stage 04
+# settings report shows which one applied:
+#   - edit the line above to "0"          -> (yours; preset 18S_PR2 would set '0.001')
+#   - swap the two MIN_FREQ_FRACTION lines in the preset block -> (preset 18S_PR2)
+#   - add  override MIN_FREQ_FRACTION "0"  in "Your overrides" -> (yours: override ...)
 
 # ---- 05 Taxonomy ------------------------------------------------------------
 # Rank names of your reference taxonomy, in order. This is the single place ranks are

@@ -245,7 +245,12 @@ Before classification, which makes classification faster and lighter on memory
   and records the threshold in `filter_thresholds.tsv` for the methods section.
 
 Set `MIN_SAMPLES=1` for designs with unique, unreplicated samples. Set
-`MIN_FREQ_FRACTION=0` to drop the frequency rule. Don't add a second, different abundance
+`MIN_FREQ_FRACTION=0` to drop the frequency rule. This turns off only that rule:
+`MIN_SAMPLES` still applies, so with `MIN_SAMPLES=1` (as in the 18S_PR2 preset) stage 4
+removes nothing at all. With the preset on, set the 0 in any of three ways: edit the
+`MIN_FREQ_FRACTION` line, swap the two preset lines, or add
+`override MIN_FREQ_FRACTION "0"`. The stage 4 settings report shows which one applied
+(`yours`, `preset 18S_PR2` or `yours: override`). Don't add a second, different abundance
 filter in R (MH-R's ≥100 reads): one documented rule is easier to defend.
 
 **Checkpoint:** many ASVs but few reads should be removed.
