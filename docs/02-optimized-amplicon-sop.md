@@ -28,8 +28,19 @@ explains the decisions; the scripts carry them out.
 | D10 | 16S: SEPP **+ `fragment-insertion filter-features`**; 18S: MAFFT/FastTree pipeline; ITS: no tree | `MH_2026.3-workflow`, `moving_pictures_tutorial`, `gut_to_soil_tutorial` | The filter step is missing in MH (comparison E7). |
 | D11 | Diversity via **q2-boots core-metrics** (rarefaction, n = 100, fixed seed) | `gut_to_soil_tutorial`, `conceptual_overview` | Averages over many rarefactions instead of one random draw. |
 | D12 | PERMANOVA (pairwise) **+ PERMDISP** + multi-factor `adonis` | `moving_pictures_tutorial`, `MH_2026.3-stats-visualization`, `MH_2026.3-R` | Not in any source: the dispersion check is needed to interpret PERMANOVA. |
-| D13 | ANCOM-BC2 in QIIME 2 (ASV and genus); R consensus of ANCOM-BC2 + ALDEx2 + MaAsLin3 | `gut_to_soil_tutorial`, `MH_2026.3-R` | Current QIIME 2 method plus MH's multi-tool practice, with the same input to every tool. |
+| D13 | ANCOM-BC2 in QIIME 2 (ASV and the `TAXA_COLLAPSE_LEVEL` rank, genus by default); R consensus of ANCOM-BC2 + ALDEx2 + MaAsLin3 | `gut_to_soil_tutorial`, `MH_2026.3-R` | Current QIIME 2 method plus MH's multi-tool practice, with the same input to every tool. |
 | D14 | Export for R plus `replay-provenance` and `replay-supplement` | `MH_*`, `gut_to_soil_tutorial` | Portable data plus an exact methods record. |
+
+These are the generic (Illumina 16S) defaults. `PRESET="18S_PR2"` (§2.1) changes:
+- **D4:** 18S V4 primers.
+- **D5:** DADA2 pseudo-pooling.
+- **D6:** `MIN_SAMPLES=1`; the 0.1% rule stays on.
+- **D7:** a PR2 classifier built in stage 05a.
+- **D8:** excludes `d__Bacteria`, `d__Archaea` and PR2's organelle tags instead of mitochondria/chloroplast.
+- **D10:** no tree, with kmer-based diversity instead.
+- **D13:** collapsed-table DA at PR2 genus (level 8 of 9), with overview plots at division.
+
+Each stage's settings report shows which values came from the preset.
 
 ---
 
@@ -332,7 +343,7 @@ two and compare `[gut_to_soil_tutorial (dev)]`.
 | Marker | Method | Source |
 |---|---|---|
 | 16S | `fragment-insertion sepp` into a reference tree, **then `fragment-insertion filter-features`** to drop ASVs SEPP could not place | `[MH_2026.3-workflow §5.1]`, `[experienced_researchers]` (reference trees are higher quality) |
-| 18S | `phylogeny align-to-tree-mafft-fasttree` (one command doing MAFFT → mask → FastTree → midpoint root) | `[moving_pictures_tutorial]`; same steps as `[MH_*]` §5B |
+| 18S | `phylogeny align-to-tree-mafft-fasttree` (one command doing MAFFT → mask → FastTree → midpoint root). This is what `TREE_METHOD=auto` does; the **18S_PR2 preset sets `TREE_METHOD=none`** and turns on kmer-based diversity instead, because a de novo tree from short V4 reads across all eukaryotes is unreliable. | `[moving_pictures_tutorial]`; same steps as `[MH_*]` §5B |
 | ITS / other | no tree: non-phylogenetic metrics, optionally kmer-based diversity | `[gut_to_soil_tutorial]` |
 
 SEPP references `[MH_2026.3-workflow]`: Greengenes2 2022.10 backbone (MH's current choice,
@@ -408,7 +419,7 @@ Follows `[MH_2026.3-R]`, with the defects listed in the comparison (E8–E15) fi
 | QC | Library sizes and `vegan::rarecurve` with the rarefaction depth marked | — |
 | Alpha | Observed, Shannon, inverse Simpson: **median of 100 rarefactions**; Wilcoxon or Kruskal–Wallis with BH correction | MH-R used one rarefaction and no test |
 | Beta | Bray–Curtis (proportions), **robust Aitchison** (counts), Jaccard and unweighted UniFrac (rarefied), weighted UniFrac (proportions); `adonis2(by = "margin")` **+ `betadisper`**; PCoA, with ellipses only for categorical groups | MH-R had no dispersion test, put presence/absence metrics on unrarefied data, and drew ellipses on a continuous variable |
-| Composition | Phylum- and genus-level stacked bars of the top 15 taxa + "Other" + "Unassigned" (grey) | MH-R's bars didn't sum to 100% |
+| Composition | Stacked bars at the overview rank (`OVERVIEW_RANK_LEVEL`: Phylum by default, Division under 18S_PR2) and at the DA rank (`TAXA_COLLAPSE_LEVEL`: Genus in both), each showing the top 15 taxa + "Other" + "Unassigned" (grey) | MH-R's bars didn't sum to 100% |
 | DA | Genus level, prevalence ≥10%, **same unrarefied counts** for ANCOM-BC2, ALDEx2 (Wilcoxon or KW) and MaAsLin3 (TSS/LOG + log-depth covariate). BH q ≤ 0.10. Consensus = significant in ≥2 methods **with the same direction**. ALDEx2's effect sign is aligned to the reference level, since it orders groups alphabetically. | MH-R gave MaAsLin3 rarefied input, loaded the wrong MaAsLin package, and didn't check direction |
 
 The reference level comes from `DA_REFERENCE` (e.g. `treatment::control`). Set
