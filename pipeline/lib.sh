@@ -23,6 +23,17 @@ preset() {
     fi
 }
 
+# override VAR VALUE: used in the "Your overrides" section at the end of config.sh.
+# Applied after the preset, so it always wins; reported as (yours: override ...).
+override() {
+    local var="$1" value="$2" src_var="PRESET_SRC_$1" note="yours: override"
+    case "${!src_var:-}" in
+        "preset "*) note="yours: override; ${!src_var} would set '${!var-}'" ;;
+    esac
+    printf -v "$var" '%s' "$value"
+    printf -v "PRESET_SRC_${var}" '%s' "$note"
+}
+
 # shellcheck source=config.sh
 source "${PIPELINE_DIR}/config.sh"
 

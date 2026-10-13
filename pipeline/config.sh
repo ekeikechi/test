@@ -17,7 +17,8 @@
 # ""        : the generic defaults below (written for Illumina 16S)
 # "18S_PR2" : 18S V4 + PR2 defaults; see the preset block at the end of this file.
 #             A preset only changes settings you left at the value shipped here;
-#             anything you edited yourself is kept.
+#             anything you edited yourself is kept. To keep a value that equals the
+#             shipped default, use the "Your overrides" section at the end.
 PRESET=""
 
 # ---- Environment ------------------------------------------------------------
@@ -149,3 +150,11 @@ if [[ "$PRESET" == "18S_PR2" ]]; then
     preset TAXA_EXCLUDE         "mitochondria,chloroplast" \
                                 "d__Bacteria,d__Archaea,:plas,:mito,:apic,:chro"
 fi
+
+# =============================================================================
+# Your overrides. Format:  override VARIABLE "value"
+# Applied last, so these always win over the preset and the values above, even when
+# your value equals a default (e.g. keeping MIN_SAMPLES=2 with PRESET="18S_PR2").
+# Each stage reports them as (yours: override ...). Example:
+#   override MIN_SAMPLES "2"
+# =============================================================================

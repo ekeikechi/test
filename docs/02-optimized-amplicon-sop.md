@@ -99,10 +99,14 @@ View `.qzv` files with QIIME 2 View (<https://view.qiime2.org>) `[all]`.
 - **`PRESET="18S_PR2"`** (top of `config.sh`) switches the generic Illumina-16S defaults
   to 18S V4 + PR2. The preset block at the end of `config.sh` lists every value it changes.
   A preset **only changes a setting you left at the value shipped in `config.sh`**: if you
-  edited it, your value is kept. The rare-ASV frequency rule has two lines in the block;
+  edited it, your value is kept. A preset cannot tell a deliberate choice from an untouched
+  default, so to keep a value that *equals* the shipped default (e.g. `MIN_SAMPLES=2` with
+  18S_PR2), write `override MIN_SAMPLES "2"` in the **Your overrides** section at the end of
+  `config.sh`; overrides are applied last and always win. The rare-ASV frequency rule has two lines in the block;
   keep one active (0.001 keeps the 0.1% rule, which is active as shipped; 0 drops it).
 - **Settings report.** Each stage starts its log with the settings it used, tagged
-  `(config)`, `(preset 18S_PR2)` or `(yours; preset 18S_PR2 would set '…')`. It saves the
+  `(config)`, `(preset 18S_PR2)`, `(yours; preset 18S_PR2 would set '…')` or
+  `(yours: override …)`. It saves the
   same list to `results/<stage>/settings_used.tsv`. The R script prints and saves its own
   list (`settings_used.csv`).
 - **Shared settings live only in `config.sh`.** These are `TAXONOMY_RANKS` (rank names),
@@ -427,7 +431,7 @@ Report these in the methods section:
 | Component | How it was checked | Result |
 |---|---|---|
 | Every `qiime` command and parameter | Read against plugin source at tags 2026.1.0 / 2026.4.0 / 2026.7.0 (and 2024.5.0 where relevant) | Names, defaults and outputs match |
-| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on seven configurations (Illumina PE 16S DADA2 2026.7; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own overrides**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. |
+| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on eight configurations (Illumina PE 16S DADA2 2026.7; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. |
 | Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
 | R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |
 | PR2 facts | RESCRIPt 2026.7.0 source (`get-pr2-data`, `dereplicate`); the PR2 5.1.1 taxonomy file (240,201 sequences) | 9 prefixed ranks; organelle tags `:plas :mito :apic :chro :nucl`; *Bacteriastrum* present |

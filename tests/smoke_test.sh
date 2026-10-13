@@ -19,11 +19,13 @@ sed 's/^PRESET=""/PRESET="18S_PR2"/' "${REPO}/pipeline/config.sh" > "$WORK/confi
 mismatches="$(bash -c '
     set -u
     preset() { [[ "${!1-}" == "$2" ]] || echo "  preset $1: shipped value \"$2\" but config.sh has \"${!1-}\""; }
+    override() { :; }
     source "$1"' _ "$WORK/config_check.sh")"
 if [[ -z "$mismatches" ]]; then echo "PASS  preset block matches the shipped config values"
 else echo "FAIL  preset block out of sync with config.sh:"; echo "$mismatches"; status=1; fi
 
-# ---- 2. Branches: name|config overrides (VAR=value written verbatim into config.sh) ----
+# ---- 2. Branches: name|config edits. VAR=value replaces that line in config.sh;
+#      an item starting with "+" is appended as a line (the "Your overrides" section). ----
 BRANCHES=(
   'illumina16S_2026.7'
   'deblur18S_2026.1|DENOISER="deblur"|MARKER="18S"|Q2_EPOCH="2026.1"'
@@ -32,6 +34,7 @@ BRANCHES=(
   'no_primers|PRIMER_F=""|PRIMER_R=""'
   'pr2_18S_preset|PRESET="18S_PR2"|CLASSIFIER=""'
   'pr2_user_override|PRESET="18S_PR2"|CLASSIFIER=""|MIN_SAMPLES=3|TAXA_COLLAPSE_LEVEL=7'
+  'pr2_override_section|PRESET="18S_PR2"|CLASSIFIER=""|+override MIN_SAMPLES "2"'
 )
 STAGES=(01_import_qc 02_trim_primers 03_denoise 04_filter_features 05a_build_pr2_classifier
         05_taxonomy 06_filter_taxa_samples 07_phylogeny 08_diversity 09_composition_da
@@ -61,7 +64,8 @@ for spec in "${BRANCHES[@]}"; do
     for kv in "CLASSIFIER=\"$B/clf.qza\"" "SEPP_REF=\"$B/sepp.qza\"" "DEBLUR_REF_SEQS=\"$B/ref.qza\"" \
               'MIN_SAMPLE_DEPTH=1' 'SAMPLING_DEPTH=1000' 'GROUP_COL="grp"' 'ADONIS_FORMULA="grp"' \
               'DADA2_TRUNC_F=150' 'DADA2_TRUNC_R=150' 'DEBLUR_TRIM_LENGTH=250' "${parts[@]:1}"; do
-        sed -i "s|^${kv%%=*}=.*|${kv}|" "$cfg"
+        if [[ "$kv" == +* ]]; then echo "${kv#+}" >> "$cfg"
+        else sed -i "s|^${kv%%=*}=.*|${kv}|" "$cfg"; fi
     done
     export SMOKE_LOG="$B/calls.log"; : > "$SMOKE_LOG"
     result="OK"
@@ -98,6 +102,11 @@ for spec in "${BRANCHES[@]}"; do
             expect "$name" "your MIN_SAMPLES=3 kept and labelled" setting_is 04_filter_features MIN_SAMPLES 3 "yours; preset 18S_PR2 would set '1'"
             expect "$name" "your TAXA_COLLAPSE_LEVEL=7 kept (family)" grep -q -- '--p-level 7 --o-collapsed-table .*table_da_family.qza' "$SMOKE_LOG"
             expect "$name" "other preset values still applied" setting_is 06_filter_taxa_samples TAXA_EXCLUDE "d__Bacteria,d__Archaea,:plas,:mito,:apic,:chro" "preset 18S_PR2" ;;
+        pr2_override_section)
+            expect "$name" "override keeps MIN_SAMPLES=2 although it equals the 16S default" \
+                setting_is 04_filter_features MIN_SAMPLES 2 "yours: override; preset 18S_PR2 would set '1'"
+            expect "$name" "stage 04 filtered with --p-min-samples 2" grep -q -- '--p-min-samples 2 ' "$SMOKE_LOG"
+            expect "$name" "rest of the preset still applied" setting_is 04_filter_features MIN_FREQ_FRACTION 0.001 "preset 18S_PR2" ;;
         deblur18S_2026.1)
             expect "$name" "2026.1 visualizer, no seed flag" bash -c "grep -q 'ancombc2-visualizer' '$SMOKE_LOG' && ! grep -q random-seed '$SMOKE_LOG'" ;;
         pacbioITS)
