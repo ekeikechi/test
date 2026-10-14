@@ -5,8 +5,10 @@
 # Inputs : the plain-text exports written by pipeline/10_export_provenance.sh
 #          (feature-table.tsv, taxonomy.tsv, metadata.tsv, optional tree.nwk) and
 #          analysis_settings.tsv, which carries TAXONOMY_RANKS, TAXA_COLLAPSE_LEVEL,
-#          OVERVIEW_RANK_LEVEL, SAMPLING_DEPTH, GROUP_COL, DA_REFERENCE and RANDOM_SEED
-#          from pipeline/config.sh.
+#          OVERVIEW_RANK_LEVEL, SAMPLING_DEPTH (a number, or "auto" = smallest sample),
+#          MIN_SAMPLE_DEPTH, GROUP_COL, DA_REFERENCE and RANDOM_SEED from pipeline/config.sh.
+#          For split-plot / nested designs use R/design_analysis.R instead (one design
+#          file per manuscript, R/designs/).
 # Usage  : Rscript R/downstream_analysis.R [export_dir] [out_dir] [group_column]
 #          (group_column overrides GROUP_COL from the settings file)
 #
@@ -40,7 +42,8 @@ cfg <- list(
   ranks          = c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"),
   collapse_level = 6,           # TAXA_COLLAPSE_LEVEL: rank number used for DA
   overview_level = 2,           # OVERVIEW_RANK_LEVEL: rank number for overview barplots
-  rarefy_depth   = NULL,        # SAMPLING_DEPTH; NULL = smallest library size
+  rarefy_depth   = NULL,        # SAMPLING_DEPTH; NULL (or "auto") = smallest library size
+  min_sample_depth = NULL,      # MIN_SAMPLE_DEPTH: drop samples with fewer reads (as stage 06)
   rarefy_iter    = 100,         # iterations averaged for alpha diversity
   seed           = 711,         # RANDOM_SEED [MH_2026.3-R]
   permutations   = 999,
@@ -54,9 +57,9 @@ say <- function(...) message(sprintf(...))
 # Shared settings from pipeline/config.sh, handed over by stage 10. This makes
 # config.sh the single source for ranks, DA rank, sampling depth, group, reference
 # and seed, so QIIME 2 and R cannot silently disagree.
-src <- setNames(rep("script default", 7),
-                c("ranks", "collapse_level", "overview_level", "rarefy_depth", "seed",
-                  "group", "group_ref"))
+src <- setNames(rep("script default", 8),
+                c("ranks", "collapse_level", "overview_level", "rarefy_depth",
+                  "min_sample_depth", "seed", "group", "group_ref"))
 if (!is.null(cfg$group)) src[["group"]] <- "command line"
 settings_path <- file.path(cfg$export_dir, "analysis_settings.tsv")
 if (file.exists(settings_path)) {
@@ -69,7 +72,11 @@ if (file.exists(settings_path)) {
     cfg$ranks <- from_file("ranks", strsplit(v, "\\s+")[[1]])
   if (!is.null(v <- get("collapse_level"))) cfg$collapse_level <- from_file("collapse_level", as.integer(v))
   if (!is.null(v <- get("overview_level"))) cfg$overview_level <- from_file("overview_level", as.integer(v))
-  if (!is.null(v <- get("sampling_depth"))) cfg$rarefy_depth <- from_file("rarefy_depth", as.integer(v))
+  # SAMPLING_DEPTH "auto" (stage 08 depth rules) = the smallest remaining sample, as below
+  if (!is.null(v <- get("sampling_depth")) && grepl("^[0-9]+$", v))
+    cfg$rarefy_depth <- from_file("rarefy_depth", as.integer(v))
+  if (!is.null(v <- get("min_sample_depth")) && grepl("^[0-9]+$", v))
+    cfg$min_sample_depth <- from_file("min_sample_depth", as.integer(v))
   if (!is.null(v <- get("random_seed")))    cfg$seed <- from_file("seed", as.integer(v))
   if (is.null(cfg$group) && !is.null(v <- get("group_col"))) cfg$group <- from_file("group", v)
   if (!is.null(v <- get("da_reference")) && !is.null(cfg$group)) {
@@ -93,12 +100,13 @@ out <- function(...) file.path(cfg$out_dir, ...)
 
 # Report the settings actually used, with their source.
 used <- data.frame(
-  setting = c("ranks", "collapse_level (DA rank)", "overview_level", "rarefy_depth", "seed",
-              "group", "group_ref"),
+  setting = c("ranks", "collapse_level (DA rank)", "overview_level", "rarefy_depth",
+              "min_sample_depth", "seed", "group", "group_ref"),
   value = c(paste(cfg$ranks, collapse = " "),
             sprintf("%d (%s)", cfg$collapse_level, cfg$da_rank),
             sprintf("%d (%s)", cfg$overview_level, cfg$overview_rank),
             if (is.null(cfg$rarefy_depth)) "smallest library" else cfg$rarefy_depth,
+            if (is.null(cfg$min_sample_depth)) "none" else cfg$min_sample_depth,
             cfg$seed, cfg$group,
             if (is.null(cfg$group_ref)) "first level alphabetically" else cfg$group_ref),
   source = unname(src))
@@ -177,6 +185,12 @@ if (has_tree) {
   tree <- ape::keep.tip(tree, intersect(tree$tip.label, taxa_names(ps)))
   if (!ape::is.rooted(tree)) { say("Tree is unrooted; skipping UniFrac."); has_tree <- FALSE }
   else ps <- merge_phyloseq(ps, phy_tree(tree))
+}
+if (!is.null(cfg$min_sample_depth) && any(sample_sums(ps) < cfg$min_sample_depth)) {
+  low <- sample_names(ps)[sample_sums(ps) < cfg$min_sample_depth]
+  say("Removing %d sample(s) below MIN_SAMPLE_DEPTH = %d reads: %s", length(low),
+      cfg$min_sample_depth, paste(low, collapse = ", "))
+  ps <- prune_samples(sample_sums(ps) >= cfg$min_sample_depth, ps)
 }
 ps <- prune_taxa(taxa_sums(ps) > 0, ps)
 say("Imported %d samples x %d features (tree: %s)", nsamples(ps), ntaxa(ps), has_tree)

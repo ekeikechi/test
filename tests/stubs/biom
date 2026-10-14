@@ -3,6 +3,7 @@
 echo "biom $*" >> "$SMOKE_LOG"
 if [[ $1 == summarize-table ]]; then
     printf 'Num samples: 3\nCounts/sample summary:\n Min: 10.000\n Max: 50,000.000\n Median: 12,345.600\n Mean: 23,456.700\n'
+    printf 'Counts/sample detail:\na: 1,200.000\nb: 2,500.000\nc: 4,000.000\nd: 900.000\n'
     exit 0
 fi
 args=("$@")

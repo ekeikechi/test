@@ -11,7 +11,7 @@ show_settings "$D" \
     DADA2_TRUNC_F DADA2_TRUNC_R DADA2_TRUNC_MIN_MEDIAN_Q DADA2_TRUNC_MIN_READ_FRACTION \
     DADA2_TRUNC_SUM_TARGET DADA2_MAX_EE_F DADA2_MAX_EE_R DADA2_POOLING \
     DEBLUR_TRIM_LENGTH DEBLUR_REF_SEQS \
-    CCS_FRONT CCS_ADAPTER CCS_MIN_LEN CCS_MAX_LEN CCS_MAX_EE NCORES
+    CCS_FRONT CCS_ADAPTER CCS_MIN_LEN CCS_MAX_LEN CCS_MAX_EE MIN_SAMPLE_DEPTH NCORES
 
 if [[ "$PLATFORM" == "pacbio" ]]; then
     IN="${OUT}/01_import/reads.qza"
@@ -160,6 +160,18 @@ if [[ -e "$D/denoising_stats.qza" ]] && ! have "$D/denoising_stats.qzv"; then
         --m-input-file "$METADATA" \
         --m-input-file "$D/denoising_stats.qza" \
         --o-visualization "$D/denoising_stats.qzv"
+fi
+
+# Post-DADA2 check: flag samples far worse than the rest at filtering, merging or chimera
+# removal, or below MIN_SAMPLE_DEPTH (warnings only; see pipeline/denoise_check.py).
+if [[ -e "$D/denoising_stats.qza" ]]; then
+    have "$D/denoising_stats/stats.tsv" || run qiime tools export \
+        --input-path "$D/denoising_stats.qza" --output-path "$D/denoising_stats"
+    depth_args=()
+    [[ "$MIN_SAMPLE_DEPTH" =~ ^[0-9]+$ ]] && depth_args=(--min-depth "$MIN_SAMPLE_DEPTH")
+    log "Post-DADA2 sample check (flags in $D/denoising_flags.tsv)"
+    python3 "${PIPELINE_DIR}/denoise_check.py" --stats "$D/denoising_stats/stats.tsv" \
+        --out "$D/denoising_flags.tsv" ${depth_args[@]+"${depth_args[@]}"} >&2
 fi
 
 summarize "$D/table.qza" "$D/table"

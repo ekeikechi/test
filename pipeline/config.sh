@@ -131,6 +131,7 @@ CLASSIFY_CONFIDENCE="0.7"
 TAXA_EXCLUDE="mitochondria,chloroplast"   # 16S default [MH_*]; "" to skip
 TAXA_INCLUDE=""                           # e.g. "p__" to drop phylum-unassigned ASVs (not default)
 MIN_SAMPLE_DEPTH=""                       # set after viewing rarefaction curves (e.g. 1000-4000)
+# Stage 06 lists the removed samples (06_filter_taxa_samples/samples_removed.tsv).
 
 # ---- 07 Phylogeny -----------------------------------------------------------
 # auto: 16S -> sepp ; 18S -> denovo ; ITS/other -> none
@@ -138,7 +139,14 @@ TREE_METHOD="auto"                        # auto | sepp | denovo | none
 SEPP_REF=""                               # SEPP reference .qza (e.g. GG2 2022.10 backbone) [MH_2026.3-workflow]
 
 # ---- 08 Diversity -----------------------------------------------------------
-SAMPLING_DEPTH=""                         # even-sampling depth; set after stage 06 review
+SAMPLING_DEPTH=""                         # even-sampling depth; set after stage 06 review, or "auto"
+# "auto" = the smallest sample left after MIN_SAMPLE_DEPTH, so no further sample is lost.
+# Sensitivity depth: with DEPTH_SENSITIVITY_GROUPS (metadata columns, e.g. "round depth_layer"),
+# stage 08 also rarefies at the deepest depth at which every group keeps at least
+# DEPTH_SENSITIVITY_MIN_KEEP of its samples (08_diversity/sensitivity/). The choice and the
+# samples each depth drops are written to 08_diversity/depth_choice.tsv and depth_by_group.tsv.
+DEPTH_SENSITIVITY_GROUPS=""
+DEPTH_SENSITIVITY_MIN_KEEP=0.8
 BOOTS_N=100                               # resampling iterations [gut_to_soil_tutorial (dev)]
 RUN_KMER_DIVERSITY="no"                   # yes = also run tree-free kmer-diversity [gut_to_soil_tutorial]
 
@@ -168,6 +176,9 @@ if [[ "$PRESET" == "18S_PR2" ]]; then
     preset DADA2_TRUNC_F        ""      "auto"            # quality rule + overlap target below
     preset DADA2_TRUNC_R        ""      "auto"
     preset DADA2_TRUNC_SUM_TARGET "" "520"                # 2x300 V4: 95% of PR2 sequences merge
+    preset DADA2_MAX_EE_R       "2"     "3"               # 2x300 reverse tails: +9% reads, +2% ASVs on the first 18S V4 run
+    preset MIN_SAMPLE_DEPTH     ""      "1000"            # failed-sample floor
+    preset SAMPLING_DEPTH       ""      "auto"            # smallest remaining sample
     preset TREE_METHOD          "auto"  "none"            # no reliable tree across all eukaryotes
     preset RUN_KMER_DIVERSITY   "no"    "yes"             # tree-free relatedness-aware metrics
     preset MIN_SAMPLES          "2"     "1"               # keep taxa found at a single site

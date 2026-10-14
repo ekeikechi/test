@@ -32,6 +32,9 @@ explains the decisions; the scripts carry them out.
 | D14 | Export for R plus `replay-provenance` and `replay-supplement` | `MH_*`, `gut_to_soil_tutorial` | Portable data plus an exact methods record. |
 | D15 | DADA2 truncation chosen by hand from the quality plot, or **`auto`**: cut before the first position with median quality < 25 (or where < 75% of reads are that long), then lengthen the better read until F+R reaches the overlap target | Quality rule: nf-core/ampliseq (not one of the eight sources). Overlap target: PR2 V4 insert lengths, measured for this SOP | Reproducible, logged choice; the overlap target stops long-insert taxa from vanishing at merging without an error. |
 | D16 | PR2 traits for every ASV (18S + PR2 only): ecological function, mixoplankton type, HAB, WoRMS habitat, WoRMS/GBIF ids, source evidence and SILVA/UniEuk cross-names, taken from the PR2 species under the ASV's assigned taxon when ≥ 90% agree; a cited override list; land plants reported apart; a photosynthesis category, with dinoflagellates resolved by genus and diets for all groups from Adl et al. 2019 | PR2 5.1.1 database (Sommeria-Klein et al. 2021; Mitra et al. 2023; WoRMS) and Adl et al. 2019 Appendix S2 — not among the eight sources | Uses all of PR2's functional data with its provenance shown, and fixes the lineage-level errors that matter for photosynthetic protists |
+| D17 | After DADA2, flag samples whose filter pass, merging or chimera loss is far worse than the run's median (> 4 robust SD **and** > 5 percentage points) | Not in any source; robust outlier rule | Catches failed libraries and primer problems in single samples without hand-reading 200+ rows; flags only, nothing is removed |
+| D18 | Depth rules: `MIN_SAMPLE_DEPTH` floor; `SAMPLING_DEPTH="auto"` = the smallest remaining sample; a **sensitivity depth** = the deepest depth at which every group (`DEPTH_SENSITIVITY_GROUPS`) keeps ≥ 80% of its samples, with the diversity analyses repeated there | `MH_*` (failed-sample floor), `gut_to_soil_tutorial (dev)` ("try two depths and compare") | Main results keep every sample; the sensitivity run shows whether conclusions depend on the shallow ones, and the per-group table shows which samples a deeper depth would cost |
+| D19 | **Design-aware statistics** for nested field designs (`R/design_analysis.R`): plots and subplots as random intercepts in linear mixed models (alpha diversity) and in ANCOM-BC2 / MaAsLin3; hierarchical PERMANOVA testing each term on the units of its stratum with restricted permutations; ALDEx2 as supporting evidence only | Not in any source (all eight assume independent samples); split-plot analysis as in standard experimental design texts; PERMANOVA restricted permutations (vegan/permute) | Samples from the same plot are not independent replicates. Without the plot terms, plot-level treatments are tested against sample-level noise, inflating false positives |
 
 These are the generic (Illumina 16S) defaults. `PRESET="18S_PR2"` (§2.1) changes:
 - **D4:** 18S V4 primers.
@@ -42,6 +45,9 @@ These are the generic (Illumina 16S) defaults. `PRESET="18S_PR2"` (§2.1) change
 - **D8:** excludes `d__Bacteria`, `d__Archaea` and PR2's organelle tags instead of mitochondria/chloroplast.
 - **D10:** no tree, with kmer-based diversity instead.
 - **D13:** collapsed-table DA at PR2 genus (level 8 of 9), with overview plots at division.
+- **D15:** reverse-read expected-error limit `DADA2_MAX_EE_R=3` (forward stays 2). On the
+  first 2×301 18S V4 run this kept 8.9% more reads and gave 2% more ASVs.
+- **D18:** `MIN_SAMPLE_DEPTH=1000` and `SAMPLING_DEPTH="auto"`.
 
 Each stage's settings report shows which values came from the preset.
 
@@ -71,12 +77,14 @@ conda create -n readqc -c conda-forge -c bioconda fastqc multiqc
 ```
 
 **R** (stage 11): R ≥ 4.3 with `phyloseq`, `vegan`, `ggplot2`, `dplyr`, `tidyr`, `ALDEx2`,
-`maaslin3`, `ANCOMBC`, `ape`, plus `qs` for the PR2 trait step (11a). For example:
+`maaslin3`, `ANCOMBC`, `ape`, plus `qs` for the PR2 trait step (11a) and `lme4` +
+`lmerTest` for the design-aware statistics (11b). For example:
 
 ```bash
 conda create -n amplicon-r -c conda-forge -c bioconda r-base=4.5 bioconductor-phyloseq r-vegan \
-  r-ggplot2 r-dplyr r-tidyr bioconductor-aldex2 bioconductor-maaslin3 bioconductor-ancombc r-ape r-qs
-# existing environment: conda install -n amplicon-r -c conda-forge r-qs
+  r-ggplot2 r-dplyr r-tidyr bioconductor-aldex2 bioconductor-maaslin3 bioconductor-ancombc r-ape r-qs \
+  r-lme4 r-lmertest
+# existing environment: conda install -n amplicon-r -c conda-forge r-qs r-lme4 r-lmertest
 ```
 
 ## 2. Project layout and how to run
@@ -88,7 +96,9 @@ project/
 │                        enough for stages 1–7; stages 8–11 need GROUP_COL and its column
 ├── manifest.tsv         only when IMPORT_MODE=manifest
 ├── pipeline/            config.sh, lib.sh, stage scripts 01_…10_ (+ optional 05a_)
-├── R/downstream_analysis.R
+├── R/downstream_analysis.R   group comparisons of independent samples
+├── R/design_analysis.R      nested / split-plot designs, one design file per analysis
+├── R/designs/               design files (e.g. one per manuscript)
 └── results/             created by the pipeline: one folder per stage
 ```
 
@@ -100,10 +110,12 @@ bash pipeline/02_trim_primers.sh
 # ...03, 04, 05a (only builds a PR2 classifier when BUILD_PR2_CLASSIFIER=yes), 05...
 bash pipeline/10_export_provenance.sh
 Rscript R/downstream_analysis.R results/10_export results/11_R   # group from GROUP_COL
+Rscript R/design_analysis.R R/designs/<your design>.tsv          # nested designs (§11b)
 ```
 
 The pipeline needs human decisions at several points: truncation lengths, the minimum sample
-depth, and the even-sampling depth. When a decision variable is still empty in `config.sh`,
+depth, and the even-sampling depth (each can also be set to a documented automatic rule:
+D15, D18). When a decision variable is still empty in `config.sh`,
 the stage that needs it **stops and names the `.qzv` to inspect**. Set the value and re-run
 that stage. Stages skip outputs that already exist, so re-running is safe. To redo a step,
 delete its output files yourself first.
@@ -451,6 +463,12 @@ qiime dada2 denoise-ccs --i-demultiplexed-seqs results/01_import/reads.qza \
 qiime metadata tabulate --m-input-file $METADATA \
   --m-input-file results/03_denoise/denoising_stats.qza \
   --o-visualization results/03_denoise/denoising_stats.qzv
+# DADA2 only: post-DADA2 sample check (D17); flags, removes nothing
+qiime tools export --input-path results/03_denoise/denoising_stats.qza \
+  --output-path results/03_denoise/denoising_stats
+python3 pipeline/denoise_check.py --stats results/03_denoise/denoising_stats/stats.tsv \
+  --out results/03_denoise/denoising_flags.tsv --min-depth $MIN_SAMPLE_DEPTH
+# (--min-depth only when MIN_SAMPLE_DEPTH is a number)
 qiime feature-table summarize --i-table results/03_denoise/table.qza --m-metadata-file $METADATA \
   --o-summary results/03_denoise/table_summary.qzv \
   --o-sample-frequencies results/03_denoise/table_sample_frequencies.qza \
@@ -462,7 +480,8 @@ qiime feature-table tabulate-seqs --i-data results/03_denoise/rep_seqs.qza \
 
 **Outputs** (`results/03_denoise/`): `table.qza`, `rep_seqs.qza`, `denoising_stats.qzv`
 (or `deblur_stats.qzv`), `table_summary.qzv`, `rep_seqs.qzv`, `settings_used.tsv`; with
-automatic truncation also `truncation_auto.tsv`.
+automatic truncation also `truncation_auto.tsv`; with DADA2 also `denoising_stats/stats.tsv`
+and `denoising_flags.tsv`.
 
 **Check**
 - In `denoising_stats.qzv` (merged with the sample metadata `[gut_to_soil_tutorial]`),
@@ -470,6 +489,15 @@ automatic truncation also `truncation_auto.tsv`.
   - losses at *filtered*: truncation is too aggressive
   - losses at *merged*: the overlap is too short (watch this for 18S V4)
   - losses at *non-chimeric*: often leftover primers
+- `denoising_flags.tsv` (also printed at the end of the stage) lists, per sample, the share
+  of reads passing the filter, the share of denoised reads that merged, the chimera share,
+  the final reads and any flags. A step is flagged when a sample is worse than the run's
+  median by more than 4 robust standard deviations (1.4826 × MAD) **and** by more than 5
+  percentage points; the second condition stops steps where every sample is nearly
+  identical from flagging trivial differences. Flags: `low_filter_pass`, `low_merge`
+  (paired-end), `high_chimera`, and `low_depth` (final reads below `MIN_SAMPLE_DEPTH`).
+  Look at the flagged samples' FastQC reports and trimming statistics; remove a sample
+  only for a documented reason (`MIN_SAMPLE_DEPTH` removes the shallow ones in stage 6).
 - With Deblur, check `deblur_stats.qzv` instead. Very low depth after Deblur is a red flag
   `[MH_*]`.
 
@@ -659,7 +687,8 @@ qiime feature-table tabulate-seqs \
 3. Set `MIN_SAMPLE_DEPTH` to remove **failed** samples. Researchers often use 1000–4000, or
    much lower to drop only total failures `[MH_*]`. Check how many samples each group loses
    (*Interactive Sample Detail*, grouped by your main column) `[gut_to_soil_tutorial]`.
-   Use `1` to keep everything.
+   Use `1` to keep everything. The `18S_PR2` preset sets 1000. The removed samples are
+   listed in `samples_removed.tsv`.
 4. Filter the representative sequences to the final table.
 
 **Run** (twice: the first run stops at the `MIN_SAMPLE_DEPTH` checkpoint)
@@ -706,16 +735,20 @@ qiime feature-table summarize --i-table results/06_filter_taxa_samples/table_fin
 
 **Outputs** (`results/06_filter_taxa_samples/`): `table_taxfilt.qza` and its summary,
 `rarefaction_grouped.qzv`, `rarefaction_per_sample.qzv`, `table_final.qza`,
-`rep_seqs_final.qza`, `table_final_summary.qzv`, `settings_used.tsv`.
+`rep_seqs_final.qza`, `table_final_summary.qzv`, `samples_removed.tsv` (sample, reads),
+`settings_used.tsv`.
 
 **Check**
 - In the rarefaction curves, see where richness levels off before choosing
   `MIN_SAMPLE_DEPTH`.
+- `samples_removed.tsv`: are the removed samples concentrated in one treatment, round or
+  depth? If so, report it; the loss is not random.
 - In `table_final_summary.qzv` (*Interactive Sample Detail*, grouped by your main column),
   see how many samples each group loses, then choose `SAMPLING_DEPTH` for stage 8. Make it
   as high as possible while losing few samples, near where the curves level off `[all]`.
   Results are fairly stable across reasonable depths, so try two and compare
-  `[gut_to_soil_tutorial (dev)]`.
+  `[gut_to_soil_tutorial (dev)]`. `SAMPLING_DEPTH="auto"` with
+  `DEPTH_SENSITIVITY_GROUPS` does exactly that by rule (stage 8, D18).
 
 ## Stage 7. Phylogeny (`07_phylogeny.sh`)
 
@@ -781,6 +814,18 @@ version and this SOP use rarefaction, which is the more widely used approach. Op
 metrics `[gut_to_soil_tutorial]`. This is useful for ITS. Remember that "observed features"
 then counts kmers, not ASVs.
 
+**Depth rules (D18).** With `SAMPLING_DEPTH="auto"` the depth is the smallest sample left
+after `MIN_SAMPLE_DEPTH`, so no further sample is lost. With `DEPTH_SENSITIVITY_GROUPS`
+(metadata columns, e.g. `"round depth_layer"`), stage 8 also finds the **sensitivity
+depth**: for each group (each combination of those columns) the depth at which
+`DEPTH_SENSITIVITY_MIN_KEEP` (default 0.8) of its samples remain, then the smallest of these
+over all groups. `core-metrics` runs again at that depth (`sensitivity/core/`). Choose the
+groups so that no cell of the design can be emptied: for a design where depth layers
+differ greatly in read numbers, use the layer together with the sampling round. On the
+first 18S V4 run (216 samples, before taxonomy filtering) the rule gave a main depth of
+1085 and a sensitivity depth of 1884, set by the 4 cm samples of round 2, keeping 198 of
+208 samples.
+
 Statistics:
 
 - `diversity alpha-group-significance` (Kruskal–Wallis) for categorical columns and
@@ -793,6 +838,8 @@ Statistics:
 - `diversity adonis` for multi-factor models (`ADONIS_FORMULA`). QIIME 2 fits terms
   **sequentially** (`by = "terms"`, so order matters); the R script reports **marginal**
   terms (comparison E14).
+- These QIIME 2 tests treat every sample as independent. For nested or split-plot
+  designs, use them only for a first look and report the tests from §11b.
 
 **Run**
 
@@ -803,6 +850,14 @@ bash pipeline/08_diversity.sh
 **What it runs**
 
 ```bash
+# SAMPLING_DEPTH="auto" or DEPTH_SENSITIVITY_GROUPS set: per-sample reads of <table>
+# (biom summarize-table) to sample_depths.tsv, then
+python3 pipeline/choose_depth.py --depths results/08_diversity/sample_depths.tsv \
+  --metadata $METADATA --groups "$DEPTH_SENSITIVITY_GROUPS" \
+  --min-keep $DEPTH_SENSITIVITY_MIN_KEEP --out results/08_diversity/depth_choice.tsv \
+  --groups-out results/08_diversity/depth_by_group.tsv
+# prints "MAIN SENSITIVITY"; "auto" uses MAIN as SAMPLING_DEPTH. The command below runs
+# again with the sensitivity depth into results/08_diversity/sensitivity/core/.
 qiime boots core-metrics --i-table <table> \
   --m-metadata-file $METADATA --p-sampling-depth $SAMPLING_DEPTH --p-n $BOOTS_N \
   --p-no-replacement --p-alpha-average-method median --p-beta-average-method medoid \
@@ -850,12 +905,16 @@ and Jaccard. A tree adds Faith PD and weighted/unweighted UniFrac.
 **Outputs** (`results/08_diversity/`): `core/` (`alpha/`, `distance/`, `pcoa/`,
 `emperor/`, `scatter_plot.qzv`), `alpha_*_groups.qzv`, `alpha_*_correlation.qzv`,
 `beta_*_permanova.qzv`, `beta_*_permdisp.qzv`, `adonis_*.qzv`, `kmer/` (if run),
-`settings_used.tsv`.
+`settings_used.tsv`; with the depth rules `sample_depths.tsv`, `depth_choice.tsv`
+(depths, rules, limiting group), `depth_by_group.tsv` (samples per group kept at each depth
+and the ones the sensitivity depth drops) and `sensitivity/core/`.
 
 **Check**
 - Ordinations: `core/scatter_plot.qzv` and `core/emperor/`.
 - Read each PERMANOVA together with its PERMDISP. If PERMDISP is also significant, the
   groups may differ in spread rather than in position.
+- With a sensitivity depth: compare `core/` with `sensitivity/core/`. Conclusions that
+  change between the two depend on the shallowest samples.
 
 ## Stage 9. Composition and differential abundance (`09_composition_da.sh`)
 
@@ -970,11 +1029,13 @@ qiime tools replay-supplement --in-fp results --recurse --out-fp results/10_expo
 
 ## Stage 11. R analysis (`R/downstream_analysis.R`)
 
-Follows `[MH_2026.3-R]`, with the defects listed in the comparison (E8–E15) fixed:
+Follows `[MH_2026.3-R]`, with the defects listed in the comparison (E8–E15) fixed. It
+compares groups of **independent** samples. For designs where samples are nested in plots
+(split-plot, repeated depths or times), use §11b for the reported statistics.
 
 | Part | What it does | Change from MH-R |
 |---|---|---|
-| Settings | Reads `analysis_settings.tsv` (ranks, DA rank, overview rank, sampling depth, group, reference, seed) and prints/saves what it used | MH-R hard-coded ranks and depth |
+| Settings | Reads `analysis_settings.tsv` (ranks, DA rank, overview rank, sampling depth (`auto` = smallest sample), minimum sample depth, group, reference, seed) and prints/saves what it used | MH-R hard-coded ranks and depth |
 | Import | Reads the stage-10 TSVs. Matches samples by **ID** and reports mismatches. Keeps rank names, treats empty labels with any lowercase prefix (`g__`, `sgr__`, `dvs__`) as unassigned, and **stops** if the taxonomy is deeper than the configured ranks. Prunes the SEPP reference tips from the tree. | MH-R used hard-coded column indices and got `ta1…ta7` rank names |
 | QC | Library sizes and `vegan::rarecurve` with the rarefaction depth marked | — |
 | Alpha | Observed, Shannon, inverse Simpson: **median of 100 rarefactions**; Wilcoxon or Kruskal–Wallis with BH correction | MH-R used one rarefaction and no test |
@@ -1095,9 +1156,10 @@ current PR2 release; the script warns if it differs from the classifier's `PR2_V
 ```bash
 Rscript R/pr2_traits.R results/10_export results/11_traits
 # optional third argument: a local pr2.qs (or .rds) instead of downloading
-# then manuscript 1 (photosynthetic set) and its sensitivity version:
-Rscript R/downstream_analysis.R results/11_traits/export_photosynthetic results/11_R_photosynthetic
-Rscript R/downstream_analysis.R results/11_traits/export_photosynthetic_sensitivity results/11_R_photosynthetic_sens
+# then the photosynthetic subset, with the design-aware statistics (§11b):
+Rscript R/design_analysis.R R/designs/ms1_photosynthetic_0cm.tsv
+Rscript R/design_analysis.R R/designs/ms1_photosynthetic_0cm_sensitivity.tsv
+# (for independent samples: Rscript R/downstream_analysis.R results/11_traits/export_photosynthetic out_dir)
 ```
 
 **Outputs** (`results/11_traits/`): `asv_traits.tsv` (one row per ASV, all columns above
@@ -1114,6 +1176,146 @@ category), `traits_settings.tsv` (PR2 version, overrides file, thresholds),
 - Read every `habitat_flag` row: the taxon may be misassigned, or WoRMS may lack records.
 - `overrides_applied`: confirm the corrections suit your system, and add your own rows.
 
+### 11b. Nested and split-plot designs (`R/design_analysis.R`)
+
+**Why.** In a field experiment, treatments are often applied to plots, a second
+treatment to subplots within each plot, and several samples are then taken per subplot
+(depths, times). Samples from the same plot share its sediment, history and position, so
+they are not independent replicates of the plot treatment. A test that treats them as
+independent (Kruskal–Wallis, `adonis2` on samples, DA without random effects) tests the
+plot treatment against sample-to-sample noise and so finds "effects" too often. The
+replicates of a plot treatment are the plots `[standard split-plot analysis; not in the
+eight sources]`.
+
+**How the script handles it.** One design file per analysis (`R/designs/*.tsv`) names the
+sample subset, the fixed-effect formula, the plot and subplot columns and the reference
+levels. The script then:
+
+1. **Finds each term's stratum** from the metadata: a variable constant within every plot
+   is a *plot* (whole-plot) factor; constant within every subplot, a *subplot* factor;
+   otherwise a *sample* factor. An interaction belongs to the lowest stratum of its
+   variables. `design_strata.tsv` lists the result. `expect_strata` in the design file
+   makes the script stop if the metadata do not give the expected structure (e.g. a plot
+   ID reused in two rounds). With one sample per subplot (e.g. 0 cm only), the subplot
+   and sample strata coincide and the subplot random term is dropped.
+2. **Depth rules** as in stage 8 (D18), recomputed on the analysed subset and its reads:
+   `MIN_SAMPLE_DEPTH`, main depth = smallest remaining sample, sensitivity depth. The rule
+   is the same code path as `pipeline/choose_depth.py` and gives the same depths (tested).
+3. **Alpha diversity:** observed richness (log), Shannon, inverse Simpson (log); median of
+   `rarefy_iter` rarefactions. Linear mixed model `metric ~ fixed + (1 | plot) + (1 |
+   subplot)` (`lmerTest`, REML), type III F-tests with sum-to-zero contrasts and
+   Satterthwaite denominator df. The denominator df show the stratum each term is tested
+   in: in a balanced design, plots minus plot-level parameters for plot terms, and so on.
+   Variance components are saved (`alpha_variance_components.tsv`).
+4. **Beta diversity: hierarchical PERMANOVA.** Each term is tested in its stratum, on the
+   units of that stratum, with permutations that respect the nesting:
+
+   | Stratum | Units | Model | Permutations |
+   |---|---|---|---|
+   | plot | plot-mean profiles | `d ~ plot terms` | free |
+   | subplot | subplot-mean profiles | `d ~ plot + subplot terms` | within plots |
+   | sample | samples | `d ~ subplot + sample terms` | within subplots |
+
+   Mean profiles are mean proportions (Bray–Curtis, robust Aitchison) or, for Jaccard, the
+   share of samples in which each taxon occurs, compared with quantitative Jaccard (equal
+   to binary Jaccard for single samples). Conditioning on plot (or subplot) removes the
+   variation between plots before within-plot terms are tested; that is the error
+   structure of a split-plot ANOVA. Terms are sequential (`by = "terms"`), which in a
+   balanced design equals marginal tests. `R2_of_stratum` is the share of that stratum's
+   variation. PERMDISP is run for every factor in its stratum.
+5. **Differential abundance** at `da_rank` (prevalence ≥ `da_prevalence`), with the formula
+   `da_fixed` and the same random intercepts:
+   - **ANCOM-BC2** (`rand_formula`) and **MaAsLin3** (random effects in the formula; TSS +
+     log, log read depth as covariate) are the primary methods. A taxon is reported for a
+     coefficient when both give q ≤ `da_q` with the same sign (ANCOM-BC2 also has to pass
+     its pseudo-count sensitivity analysis).
+   - **ALDEx2** (`aldex.glm`) cannot fit random effects, so it treats samples as
+     independent. It is reported as supporting evidence only (`ALDEx2_agrees` column).
+   - Results are **per model coefficient**. With treatment coding and an interaction in
+     the formula, a main-effect coefficient is a **simple effect at the reference level**
+     of the interacting factor. For example, `nutrientenriched` in `nutrient * exclosure`
+     is the enrichment effect in the open controls. `da_coefficients.tsv` spells out each
+     coefficient's meaning.
+6. **Sensitivity depth:** alpha-diversity models and Jaccard PERMANOVA again
+   (`*_sensitivity.tsv`). Bray–Curtis, Aitchison and DA use all reads and do not depend on
+   the rarefaction depth.
+
+**Design file.** Tab-separated `setting` / `value`. `#` lines are comments. An empty
+value is taken from `analysis_settings.tsv` (that is, from `config.sh`) or the default.
+
+| Setting | Meaning | Default |
+|---|---|---|
+| `name`, `description` | label for the output folder and report | file name |
+| `export_dir` | stage 10-style export to analyse | `results/10_export` |
+| `out_dir` | output folder (or the 2nd command-line argument) | `results/11_design/<name>` |
+| `sample_filter` | R condition on metadata columns, e.g. `depth_cm == 0` | all samples |
+| `fixed` | fixed effects for alpha diversity and PERMANOVA | required |
+| `da_fixed` | fixed effects for DA | `fixed` |
+| `plot`, `subplot` | whole-plot and subplot ID columns (subplot IDs unique across plots) | `plot` required |
+| `reference` | `column::level` items | `DA_REFERENCE` |
+| `expect_strata` | `variable=stratum` items checked against the metadata | none |
+| `sampling_depth`, `min_sample_depth`, `depth_groups`, `depth_min_keep` | depth rules | `SAMPLING_DEPTH`, `MIN_SAMPLE_DEPTH`, `DEPTH_SENSITIVITY_GROUPS`, `DEPTH_SENSITIVITY_MIN_KEEP` |
+| `da_rank` | rank name for DA | rank `TAXA_COLLAPSE_LEVEL` |
+| `da_prevalence`, `da_q` | DA prevalence filter and FDR threshold | 0.1, 0.1 |
+| `permutations`, `rarefy_iter`, `seed` | PERMANOVA permutations, rarefactions, seed | 999, 100, `RANDOM_SEED` |
+| `distances` | any of `bray_curtis robust_aitchison jaccard` | all three |
+| `da_methods` | any of `ANCOMBC2 MaAsLin3 ALDEx2` | all three |
+| `cores` | cores for ANCOM-BC2 and MaAsLin3 | 1 |
+
+**Designs shipped for the Grande Anse experiment** (18 plots = 3 rounds × 2 nutrient levels
+× 3 plots, each plot sampled in one round; 3 exclosure subplots per plot; 0/1/4/7 cm). The
+metadata need the columns `round`, `nutrient`, `exclosure`, `depth_cm`, `depth_layer`, `plot`
+and `subplot` (subplot = plot + exclosure, e.g. `P03_B`).
+
+| File | Samples and taxa | `fixed` | `da_fixed` | Random intercepts |
+|---|---|---|---|---|
+| `ms1_photosynthetic_0cm.tsv` | 0 cm; `photosynthetic_capable` = yes (11a) | `nutrient * exclosure * round` | `nutrient * exclosure + round` | plot |
+| `ms1_photosynthetic_0cm_sensitivity.tsv` | as above plus unresolved dinoflagellates | same | same | plot |
+| `ms2_community_all_depths.tsv` | all samples, whole community | `nutrient * exclosure * round * depth_layer` | `nutrient * exclosure + depth_layer + round` | plot, subplot |
+
+References: `nutrient::unenriched_control`, `exclosure::open_control`, `round::R1`,
+`depth_layer::0cm`. With 18 plots and six nutrient × round cells, plot-level terms have
+12 residual df: whole-plot effects need to be large or consistent to be detected. In the
+synthetic test (below), a 6-fold whole-plot effect on 3 genera was found by the
+PERMANOVA, but ANCOM-BC2 confirmed only 1 of the 3 genera. Read non-significant
+nutrient results as "not detected with 3 plots per cell", not as "no effect".
+
+**Run** (in the R environment from §1; set `cores` in the design file)
+
+```bash
+Rscript R/design_analysis.R R/designs/ms2_community_all_depths.tsv
+Rscript R/design_analysis.R R/designs/ms1_photosynthetic_0cm.tsv   # after R/pr2_traits.R
+Rscript R/design_analysis.R R/designs/ms1_photosynthetic_0cm_sensitivity.tsv
+```
+
+The synthetic 216-sample test (40 genera) takes about 6 minutes on 4 cores, mostly
+ANCOM-BC2 and MaAsLin3 with random effects. Expect longer runs with several hundred
+genera.
+
+**Outputs** (`results/11_design/<name>/`):
+- **Design:** `design_used.tsv` (every setting with its source, the random effects and the
+  depths used), `design_strata.tsv`, `design_cells.tsv` (samples per cell).
+- **Depth rules:** `samples_removed.tsv`, `depth_choice.tsv`, `depth_by_group.tsv`.
+- **Alpha diversity:** `alpha_diversity.tsv/.pdf`, `alpha_lmm.tsv`,
+  `alpha_variance_components.tsv`.
+- **Beta diversity:** `permanova_hierarchical.tsv`, `permdisp.tsv`, `pcoa_<distance>.pdf`
+  (one page per factor).
+- **DA:** `da_coefficients.tsv`, `da_all_methods.tsv`, `da_consensus.tsv`, `maaslin3/`.
+- **Sensitivity depth:** `*_sensitivity.tsv`.
+- `sessionInfo.txt`.
+
+**Check**
+- `design_strata.tsv`: each factor sits in the stratum you applied it to.
+- `alpha_lmm.tsv`: the `DenDF` of plot terms is close to the number of plots minus the
+  plot-level parameters (12 here), not close to the number of samples. A `singular` fit
+  means a variance component was estimated as zero; the test is still valid but the
+  random term adds nothing.
+- `permanova_hierarchical.tsv` with `permdisp.tsv`, as in stage 8.
+- `da_consensus.tsv` with `da_coefficients.tsv`: read each coefficient with its stated
+  meaning.
+- `samples_removed.tsv` and `depth_by_group.tsv`, especially for the photosynthetic subset,
+  where read numbers per sample are lower than for the whole community.
+
 ---
 
 ## 12. Reporting checklist
@@ -1127,7 +1329,11 @@ Report these in the methods section:
 - [ ] Classifier: reference database, version, weighted or not, and the scikit-learn version
 - [ ] Taxa excluded; minimum sample depth; samples removed per group
 - [ ] Tree method and reference
-- [ ] Even-sampling depth, number of iterations, rarefaction vs bootstrap, seed
+- [ ] Even-sampling depth, number of iterations, rarefaction vs bootstrap, seed; the depth
+      rule and the sensitivity depth, with the samples each depth drops
+- [ ] Post-DADA2 flags (`denoising_flags.tsv`) and what was done about each flagged sample
+- [ ] For nested designs: the strata, random effects, PERMANOVA permutation scheme and how
+      DA coefficients are defined (`design_used.tsv`, `design_strata.tsv`, `da_coefficients.tsv`)
 - [ ] Statistical tests, permutations, and multiple-testing correction
 - [ ] DA methods, thresholds and the consensus rule; R `sessionInfo.txt`
 
@@ -1136,16 +1342,21 @@ Report these in the methods section:
 | Component | How it was checked | Result |
 |---|---|---|
 | Every `qiime` command and parameter | Read against plugin source at tags 2026.1.0 / 2026.4.0 / 2026.7.0 (and 2024.5.0 where relevant) | Names, defaults and outputs match |
-| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on eleven configurations (Illumina PE 16S DADA2 2026.7; the same on 2026.4; automatic truncation under the 18S_PR2 preset; automatic truncation that must lengthen R to reach the overlap target; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. The stub rejects release-specific mistakes: `cutadapt trim-*` without `--o-stats` on 2026.7 (or with it before 2026.7), `ancombc2-visualizer` on 2026.7, and `da-barplot` on ANCOM-BC2 output before 2026.7. The previous pipeline version fails these checks in 6 of 9 configurations. |
+| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on twelve configurations (Illumina PE 16S DADA2 2026.7; the same on 2026.4; automatic truncation under the 18S_PR2 preset; automatic truncation that must lengthen R to reach the overlap target; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**; **automatic depth rules**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. The stub rejects release-specific mistakes: `cutadapt trim-*` without `--o-stats` on 2026.7 (or with it before 2026.7), `ancombc2-visualizer` on 2026.7, and `da-barplot` on ANCOM-BC2 output before 2026.7. The previous pipeline version fails these checks in 6 of 9 configurations. |
 | First real-data run (2026.7, 18S V4, 216 samples) | Stages 1–3 on the user's server | Stage 1 completed. Stage 2 stopped: 2026.7 `cutadapt trim-paired` requires `--o-stats`. Fixed. A follow-up comparison of every plugin interface the pipeline calls (2026.4 vs 2026.7) found the stage 9 visualizer change too; also fixed. Stage 3: DADA2 completed (13 min, 24 threads); the `feature-table summarize` after it failed ("list index out of range") because the metadata had sample IDs only, which 2026.7 `summarize` cannot handle. The pipeline now passes metadata to `summarize` only when it has a data column, and draws grouped rarefaction curves (stage 6, same limitation in `alpha-rarefaction`) only when `GROUP_COL` is set. The test stub reproduces both failures. |
 | Automatic truncation (`auto_truncation.py`) | `tests/auto_truncation_test.sh`: 8 synthetic quality profiles with known answers (quality rule only; target already met; target forces lengthening; 2×250 reads that cannot reach the target; reads failing from position 1; stricter quality threshold), plus the decision table. Smoke test: chosen lengths reach DADA2 and the settings report; an unreachable target stops stage 3 before DADA2. Real data: the user's 2×301 18S V4 quality tables. | All pass. On the real tables the rule gives 282 / 250, the lengths chosen by hand for that run. |
 | PR2 traits (`R/pr2_traits.R`) | `tests/traits_check.sh`: synthetic PR2 database with 14 ASVs of known answer (every photo_category, an override, a class-level mixed taxon, a lineage missing from PR2 that falls back to supergroup, HAB at species and genus level, the habitat flag and its 3-species minimum, evidence columns, majority-rule SILVA name, phototroph-only export, read totals, version-mismatch warning): 28 checks. Real PR2 5.1.1: 317 pseudo-ASVs built from real lineages, then `downstream_analysis.R` on the phototroph-only export. | All pass. The real run took about 30 s; known taxa came out as expected (e.g. *Navicula*, *Gyrosigma* phototroph; *Paraphysomonas*, *Goniomonas* non-photosynthetic after override; *Chromera* phototroph after override; *Mallomonas* flagged as freshwater-only). |
 | Adl et al. 2019 trophic table | Transcribed from the PDF text layer and checked line by line against the page images (Table 2.1 printed pp. 112–113, Table 2.2 pp. 113–117, text pp. 110–112); PDF typos fixed (missing brackets for *Schmidingerella*, *Hartmannula*; *Ansanella* lost from the text layer). `tests/traits_check.sh` adds dinoflagellate cases (Table 2.1 C only → non-photosynthetic; L M → phototroph; species-variable genus and unlisted genus → unresolved), ciliate genus row and default B, the photosynthetic and sensitivity exports, and the unassigned case (44 checks in total). | All pass. Coverage against PR2 5.1.1 as stated in stage 11a. |
 | Stage 11 robustness | `tests/r_check.sh` scenario F: one metadata column, three groups. | Found and fixed: ANCOM-BC2 lost the group variable when the metadata had a single column (the previous script fails F with "variables … not in the meta data"). PCoA is now skipped with a message, instead of crashing, when a distance has fewer than two positive eigenvalues (e.g. a small subset in which every sample is identical by Jaccard). |
+| Post-DADA2 check and depth rules (`denoise_check.py`, `choose_depth.py`) | `tests/qc_scripts_test.sh`: hand-computed cases (poor filter pass, poor merging, shallow only, typical samples unflagged, no chimera flags when chimeras are ~0; main and sensitivity depth, the limiting group, samples dropped per group, no-group case, samples missing from the metadata). Smoke test: `depth_auto` configuration (removed-sample list, auto depth, sensitivity run, per-group table, settings report, hand-off to R) and the post-DADA2 flag in `pr2_auto_trunc`. Real data: the user's 216-sample DADA2 statistics. | All pass. On the real statistics, the check flagged the same 5 samples as a manual review, plus the 8 below 1000 reads; the depth rule gave main 1085 and sensitivity 1884 (limited by round 2, 4 cm). |
+| Design-aware statistics (`R/design_analysis.R`) | `tests/design_check.sh`: synthetic split-plot experiment laid out like the Grande Anse design (18 plots × 3 exclosure subplots × 4 depths = 216 samples, two shallow samples) with known effects in each stratum (nutrient on Genus01–03, full exclosure on Genus04–06, depth on Genus07–09) and random plot and subplot effects on every genus. Checks: strata; removed samples; random terms; mixed-model denominator df (plot ≈ 12, subplot ≈ 24, sample > 90); PERMANOVA term list, residual df (12, 24) and units; each true effect found in its own stratum, and no round effect; DA consensus for exclosure and depth exactly the true genera, with no false positive; coefficient meanings; R depth rule = `choose_depth.py`; the 0 cm design (one sample per subplot); and an `expect_strata` mismatch stopping the run. 27 checks. | All pass. The nutrient (whole-plot) effect was found by PERMANOVA (p = 0.005) but confirmed by both DA methods for only 1 of 3 genera, the expected cost of having 3 plots per cell. |
 | Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
 | R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |
 | PR2 facts | RESCRIPt 2026.7.0 source (`get-pr2-data`, `dereplicate`); the PR2 5.1.1 taxonomy file (240,201 sequences) | 9 prefixed ranks; organelle tags `:plas :mito :apic :chro :nucl`; *Bacteriastrum* present |
 | End-to-end on real data with QIIME 2 | **Not done.** QIIME 2 packages could not be installed where this was written. | Run the pipeline on a small dataset (e.g. the gut-to-soil tutorial data) before production use. |
 
-Re-run the checks with `bash tests/smoke_test.sh <new-dir>` (no QIIME 2 needed) and
-`bash tests/r_check.sh <new-dir>` (needs the R packages from §1).
+Re-run the checks with `bash tests/smoke_test.sh <new-dir>`,
+`bash tests/auto_truncation_test.sh <new-dir>` and `bash tests/qc_scripts_test.sh <new-dir>`
+(no QIIME 2 or R needed), and `bash tests/r_check.sh <new-dir>`,
+`bash tests/traits_check.sh <new-dir>` and `bash tests/design_check.sh <new-dir>` (need the
+R packages from §1).

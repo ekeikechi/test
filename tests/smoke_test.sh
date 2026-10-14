@@ -38,6 +38,7 @@ BRANCHES=(
   'pr2_override_section|PRESET="18S_PR2"|CLASSIFIER=""|+override MIN_SAMPLES "2"'
   'pr2_auto_trunc|PRESET="18S_PR2"|CLASSIFIER=""|DADA2_TRUNC_F=""|DADA2_TRUNC_R=""'
   'auto_trunc_lengthen|DADA2_TRUNC_F="auto"|DADA2_TRUNC_R="auto"|DADA2_TRUNC_SUM_TARGET=520|DADA2_MAX_EE_R=3'
+  'depth_auto|MIN_SAMPLE_DEPTH=1000|SAMPLING_DEPTH="auto"|DEPTH_SENSITIVITY_GROUPS="grp"|DEPTH_SENSITIVITY_MIN_KEEP=0.5'
 )
 # quality profile the stub exports for 02_trim/reads_trimmed_summary.qzv (tests/make_seven_number.py)
 profile_for() { case "$1" in auto_trunc_lengthen) echo early_drop ;; *) echo 2x300 ;; esac; }
@@ -64,8 +65,9 @@ for spec in "${BRANCHES[@]}"; do
     cp -r "${REPO}/pipeline" "$B/"
     touch "$B/manifest.tsv" "$B/raw_data/a_S1_L001_R1_001.fastq.gz"
     # metadata with a group column, except one branch with IDs only (as at the start of a project)
-    if [[ "$name" == pr2_auto_trunc ]]; then printf 'sample-id\na\n' > "$B/metadata.tsv"
-    else printf 'sample-id\tgrp\na\tx\n' > "$B/metadata.tsv"; fi
+    # (samples a-d match the stub biom's per-sample counts: 1200, 2500, 4000, 900)
+    if [[ "$name" == pr2_auto_trunc ]]; then printf 'sample-id\na\nb\nc\nd\n' > "$B/metadata.tsv"
+    else printf 'sample-id\tgrp\na\tx\nb\tx\nc\ty\nd\ty\n' > "$B/metadata.tsv"; fi
     for f in clf ref sepp; do echo stub > "$B/$f.qza"; done
     cfg="$B/pipeline/config.sh"
     # answer every checkpoint, then apply the branch's own settings
@@ -138,12 +140,21 @@ for spec in "${BRANCHES[@]}"; do
                 bash -c "grep 'feature-table summarize' '$SMOKE_LOG' | grep -vq -- '--m-metadata-file'"
             expect "$name" "ID-only metadata: grouped rarefaction curves skipped" \
                 bash -c "[[ \$(grep -c 'diversity alpha-rarefaction' '$SMOKE_LOG') == 1 ]] && ! grep -q 'alpha-rarefaction .*--m-metadata-file' '$SMOKE_LOG'"
-            expect "$name" "default expected-error filter 2/2" grep -q -- '--p-max-ee-f 2 --p-max-ee-r 2 ' "$SMOKE_LOG" ;;
+            expect "$name" "18S_PR2 preset: expected-error filter 2/3" grep -q -- '--p-max-ee-f 2 --p-max-ee-r 3 ' "$SMOKE_LOG"
+            expect "$name" "post-DADA2 check flags the bad sample" \
+                bash -c "grep -q \$'^S3\t.*low_filter_pass' '$B/results/03_denoise/denoising_flags.tsv' && ! grep -q \$'^S1\t.*low' '$B/results/03_denoise/denoising_flags.tsv'" ;;
         auto_trunc_lengthen)
             expect "$name" "reverse lengthened from 200 to 238 to reach F+R = 520" \
                 grep -q -- '--p-trunc-len-f 282 --p-trunc-len-r 238 ' "$SMOKE_LOG"
             expect "$name" "DADA2_MAX_EE_R=3 passed to DADA2" grep -q -- '--p-max-ee-r 3 ' "$SMOKE_LOG"
             expect "$name" "lengthening recorded" grep -qx $'reverse_reason\tlengthened for overlap' "$B/results/03_denoise/truncation_auto.tsv" ;;
+        depth_auto)
+            expect "$name" "sample below MIN_SAMPLE_DEPTH listed as removed" grep -q $'^d\t900' "$B/results/06_filter_taxa_samples/samples_removed.tsv"
+            expect "$name" "auto depth = smallest sample (900)" grep -q -- 'boots core-metrics .*--p-sampling-depth 900 ' "$SMOKE_LOG"
+            expect "$name" "sensitivity run at 2500 (every group keeps >= 50%)" grep -q -- 'boots core-metrics .*--p-sampling-depth 2500 .*sensitivity/core' "$SMOKE_LOG"
+            expect "$name" "per-group table lists what the sensitivity depth drops" grep -q $'^x\t2\t2\t1\ta' "$B/results/08_diversity/depth_by_group.tsv"
+            expect "$name" "settings report shows the chosen depth" setting_is 08_diversity SAMPLING_DEPTH 900 "auto, chosen in depth_choice.tsv"
+            expect "$name" "depth rules handed to R" grep -qx $'depth_sensitivity_groups\tgrp' "$B/results/10_export/analysis_settings.tsv" ;;
         illumina_single)
             expect "$name" "single-end gets --p-max-ee" grep -q -- 'denoise-single .*--p-max-ee 2 ' "$SMOKE_LOG" ;;
         deblur18S_2026.1)

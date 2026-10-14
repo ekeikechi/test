@@ -45,6 +45,9 @@ if [[ "$1 $2" == "tools export" ]]; then
         *taxonomy*) touch "$out/taxonomy.tsv" ;;
         *rep_seqs*) touch "$out/dna-sequences.fasta" ;;
         *tree*)     touch "$out/tree.nwk" ;;
+        *denoising_stats*)   # DADA2 stats: sample S3 filters badly and is shallow
+            printf 'sample-id\tinput\tfiltered\tpercentage of input passed filter\tdenoised\tmerged\tpercentage of input merged\tnon-chimeric\tpercentage of input non-chimeric\n#q2:types\tnumeric\tnumeric\tnumeric\tnumeric\tnumeric\tnumeric\tnumeric\tnumeric\n' > "$out/stats.tsv"
+            printf 'S1\t1000\t780\t78\t770\t750\t75\t750\t75\nS2\t2000\t1560\t78\t1540\t1500\t75\t1500\t75\nS3\t1000\t400\t40\t390\t370\t37\t370\t37\nS4\t3000\t2370\t79\t2340\t2280\t76\t2280\t76\n' >> "$out/stats.tsv" ;;
         *stats*)    touch "$out/metadata.tsv" ;;
         *)          touch "$out/feature-table.biom" ;;
     esac

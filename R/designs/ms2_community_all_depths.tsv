@@ -1,0 +1,32 @@
+setting	value
+# Manuscript 2: whole microbial eukaryote community, all depths and samples.
+# Split-plot: nutrient applied to plots (each plot sampled in one round), exclosure to
+# subplots within plots, four sediment depths per subplot.
+# Run: Rscript R/design_analysis.R R/designs/ms2_community_all_depths.tsv
+name	ms2_community_all_depths
+description	Whole microbial eukaryote community, 0/1/4/7 cm, rounds 1-3
+export_dir	results/10_export
+sample_filter	
+# alpha diversity and PERMANOVA: full factorial
+fixed	nutrient * exclosure * round * depth_layer
+# differential abundance: treatments and their interaction, depth and round as main effects
+da_fixed	nutrient * exclosure + depth_layer + round
+plot	plot
+subplot	subplot
+reference	nutrient::unenriched_control exclosure::open_control round::R1 depth_layer::0cm
+# stop if the metadata do not give this structure
+expect_strata	nutrient=plot round=plot exclosure=subplot depth_layer=sample
+# empty = take from analysis_settings.tsv (config.sh): sampling_depth, min_sample_depth,
+# depth_groups (DEPTH_SENSITIVITY_GROUPS), depth_min_keep, da_rank (TAXA_COLLAPSE_LEVEL)
+sampling_depth	
+min_sample_depth	
+depth_groups	round depth_layer
+depth_min_keep	
+da_rank	
+da_prevalence	0.1
+da_q	0.1
+permutations	999
+rarefy_iter	100
+distances	bray_curtis robust_aitchison jaccard
+da_methods	ANCOMBC2 MaAsLin3 ALDEx2
+cores	8

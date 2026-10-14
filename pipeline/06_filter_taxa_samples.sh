@@ -58,6 +58,14 @@ have "$D/table_final.qza" || run qiime feature-table filter-samples \
     --p-min-frequency "$MIN_SAMPLE_DEPTH" \
     --o-filtered-table "$D/table_final.qza"
 
+# Record which samples MIN_SAMPLE_DEPTH removed.
+if ! have "$D/samples_removed.tsv"; then
+    sample_depths "$D/table_taxfilt.qza" "$D/table_taxfilt_biom" "$D/sample_depths_taxfilt.tsv"
+    awk -F'\t' -v m="$MIN_SAMPLE_DEPTH" 'NR == 1 { print; next } $2 + 0 < m + 0' \
+        "$D/sample_depths_taxfilt.tsv" > "$D/samples_removed.tsv"
+    log "MIN_SAMPLE_DEPTH=${MIN_SAMPLE_DEPTH}: $(( $(wc -l < "$D/samples_removed.tsv") - 1 )) samples removed (listed in $D/samples_removed.tsv)"
+fi
+
 # Features that only occurred in removed samples are dropped from the sequences too.
 have "$D/rep_seqs_final.qza" || run qiime feature-table filter-seqs \
     --i-data "$SEQS" \
@@ -67,4 +75,4 @@ have "$D/rep_seqs_final.qza" || run qiime feature-table filter-seqs \
 summarize "$D/table_final.qza" "$D/table_final"
 
 log "CHECKPOINT: in $D/table_final_summary.qzv choose SAMPLING_DEPTH (Interactive Sample"
-log "Detail; group by ${GROUP_COL:-your main column} to see losses per group)."
+log "Detail; group by ${GROUP_COL:-your main column} to see losses per group), or use \"auto\"."

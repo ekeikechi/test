@@ -6,7 +6,8 @@ source "$(dirname "$0")/lib.sh"
 D="${OUT}/10_export"; mkdir -p "$D"
 show_settings "$D" \
     TAXONOMY_RANKS TAXA_COLLAPSE_LEVEL OVERVIEW_RANK_LEVEL SAMPLING_DEPTH GROUP_COL \
-    DA_REFERENCE RANDOM_SEED SAMPLE_HABITAT TRAIT_MIN_AGREEMENT BUILD_PR2_CLASSIFIER PR2_VERSION
+    DA_REFERENCE RANDOM_SEED SAMPLE_HABITAT TRAIT_MIN_AGREEMENT BUILD_PR2_CLASSIFIER PR2_VERSION \
+    MIN_SAMPLE_DEPTH DEPTH_SENSITIVITY_GROUPS DEPTH_SENSITIVITY_MIN_KEEP
 TABLE="${OUT}/06_filter_taxa_samples/table_final.qza"
 SEQS="${OUT}/06_filter_taxa_samples/rep_seqs_final.qza"
 TAX="${OUT}/05_taxonomy/taxonomy.qza"
@@ -64,6 +65,9 @@ DEPTH="$(awk -F'\t' 'NR > 1 { sub(/;[[:space:]]*$/, "", $2); n = split($2, a, ";
     printf 'collapse_level\t%s\n'   "$TAXA_COLLAPSE_LEVEL"
     printf 'overview_level\t%s\n'   "$OVERVIEW_RANK_LEVEL"
     printf 'sampling_depth\t%s\n'   "$SAMPLING_DEPTH"
+    printf 'min_sample_depth\t%s\n' "$MIN_SAMPLE_DEPTH"
+    printf 'depth_sensitivity_groups\t%s\n'   "$DEPTH_SENSITIVITY_GROUPS"
+    printf 'depth_sensitivity_min_keep\t%s\n' "$DEPTH_SENSITIVITY_MIN_KEEP"
     printf 'group_col\t%s\n'        "$GROUP_COL"
     printf 'da_reference\t%s\n'     "$DA_REFERENCE"
     printf 'random_seed\t%s\n'      "$RANDOM_SEED"

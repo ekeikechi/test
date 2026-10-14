@@ -109,6 +109,19 @@ metadata_columns() {
         { n = NF - 1; exit } END { print n + 0 }' "$METADATA"
 }
 
+# sample_depths TABLE.qza EXPORT_DIR OUT.tsv: reads per sample ("sample<TAB>reads"), from the
+# "Counts/sample detail" list of biom summarize-table. The BIOM export is kept in EXPORT_DIR.
+sample_depths() {
+    local table="$1" dir="$2" out="$3"
+    have "$dir/feature-table.biom" \
+        || qiime tools export --input-path "$table" --output-path "$dir" >/dev/null
+    biom summarize-table -i "$dir/feature-table.biom" | awk '
+        BEGIN { print "sample\treads" }
+        /^Counts\/sample detail:/ { on = 1; next }
+        on && /:/ { i = index($0, ":"); v = substr($0, i + 1); gsub(/[ ,]/, "", v)
+                    print substr($0, 1, i - 1) "\t" v }' > "$out"
+}
+
 # summarize TABLE.qza PREFIX: feature-table summary (2026.x pipeline interface).
 # Metadata is passed only when it has a data column: summarize (2026.7) fails with
 # "list index out of range" on ID-only metadata.

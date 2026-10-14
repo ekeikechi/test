@@ -1,0 +1,28 @@
+setting	value
+# Manuscript 1 sensitivity analysis: as ms1_photosynthetic_0cm.tsv, plus the
+# dinoflagellates whose photosynthesis neither PR2 nor Adl et al. 2019 resolves
+# (photosynthetic_capable = "doubtful" in R/pr2_traits.R).
+# Run: Rscript R/design_analysis.R R/designs/ms1_photosynthetic_0cm_sensitivity.tsv
+name	ms1_photosynthetic_0cm_sensitivity
+description	As ms1_photosynthetic_0cm plus the unresolved dinoflagellates (photosynthetic_capable = doubtful)
+export_dir	results/11_traits/export_photosynthetic_sensitivity
+sample_filter	depth_cm == 0
+fixed	nutrient * exclosure * round
+da_fixed	nutrient * exclosure + round
+plot	plot
+subplot	subplot
+reference	nutrient::unenriched_control exclosure::open_control round::R1
+expect_strata	nutrient=plot round=plot exclosure=subplot
+sampling_depth	
+min_sample_depth	
+# per round (only 0 cm is analysed)
+depth_groups	round
+depth_min_keep	
+da_rank	
+da_prevalence	0.1
+da_q	0.1
+permutations	999
+rarefy_iter	100
+distances	bray_curtis robust_aitchison jaccard
+da_methods	ANCOMBC2 MaAsLin3 ALDEx2
+cores	8

@@ -9,11 +9,12 @@
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/08_diversity"; mkdir -p "$D"
 show_settings "$D" \
-    Q2_EPOCH SAMPLING_DEPTH BOOTS_N RANDOM_SEED RUN_KMER_DIVERSITY GROUP_COL \
+    Q2_EPOCH SAMPLING_DEPTH DEPTH_SENSITIVITY_GROUPS DEPTH_SENSITIVITY_MIN_KEEP \
+    BOOTS_N RANDOM_SEED RUN_KMER_DIVERSITY GROUP_COL \
     ADONIS_FORMULA NCORES
 TREE="${OUT}/07_phylogeny/tree.qza"
 
-need SAMPLING_DEPTH "Choose it in 06_filter_taxa_samples/table_final_summary.qzv (Interactive Sample Detail)."
+need SAMPLING_DEPTH "Choose it in 06_filter_taxa_samples/table_final_summary.qzv (Interactive Sample Detail), or use \"auto\"."
 
 if [[ -e "$TREE" ]]; then
     TABLE="${OUT}/07_phylogeny/table_placed.qza"
@@ -25,25 +26,55 @@ fi
 seed_args=()
 epoch_ge 2026.4 && seed_args=(--p-random-seed "$RANDOM_SEED")
 
-# Collection outputs are written as directories: <dir>/<metric>.qza (+ .order).
-if ! have "$D/core/alpha"; then
-    mkdir -p "$D/core"
+# Depth rules (pipeline/choose_depth.py): "auto" main depth and the sensitivity depth.
+SENS_DEPTH=""
+if [[ "$SAMPLING_DEPTH" == auto || -n "$DEPTH_SENSITIVITY_GROUPS" ]]; then
+    sample_depths "$TABLE" "$D/table_biom" "$D/sample_depths.tsv"
+    grp_args=()
+    [[ -n "$DEPTH_SENSITIVITY_GROUPS" ]] && grp_args=(--metadata "$METADATA"
+        --groups "$DEPTH_SENSITIVITY_GROUPS" --min-keep "$DEPTH_SENSITIVITY_MIN_KEEP"
+        --groups-out "$D/depth_by_group.tsv")
+    picked="$(python3 "${PIPELINE_DIR}/choose_depth.py" --depths "$D/sample_depths.tsv" \
+        --out "$D/depth_choice.tsv" ${grp_args[@]+"${grp_args[@]}"})" \
+        || die "Depth choice failed; see the message above."
+    read -r MAIN_DEPTH SENS_DEPTH <<< "$picked"
+    awk -F'\t' 'NR > 1 { printf "  %-30s %s\n", $1, $2 }' "$D/depth_choice.tsv" >&2
+    if [[ "$SAMPLING_DEPTH" == auto ]]; then
+        SAMPLING_DEPTH="$MAIN_DEPTH"
+        awk -F'\t' -v OFS='\t' -v d="$SAMPLING_DEPTH" \
+            '$1 == "SAMPLING_DEPTH" { $3 = "auto, chosen in depth_choice.tsv; " $3; $2 = d } { print }' \
+            "$D/settings_used.tsv" > "$D/settings_used.tsv.new" && mv "$D/settings_used.tsv.new" "$D/settings_used.tsv"
+    fi
+    log "Rarefaction depth ${SAMPLING_DEPTH}${SENS_DEPTH:+; sensitivity depth ${SENS_DEPTH}}"
+fi
+
+# core_metrics OUTDIR DEPTH: q2-boots core-metrics; collection outputs are written as
+# directories: <dir>/<metric>.qza (+ .order).
+core_metrics() {
+    local dir="$1" depth="$2"
+    have "$dir/alpha" && return 0
+    mkdir -p "$dir"
     run qiime boots core-metrics \
         --i-table "$TABLE" \
         ${phylo_args[@]+"${phylo_args[@]}"} \
         --m-metadata-file "$METADATA" \
-        --p-sampling-depth "$SAMPLING_DEPTH" \
+        --p-sampling-depth "$depth" \
         --p-n "$BOOTS_N" \
         --p-no-replacement \
         --p-alpha-average-method median \
         --p-beta-average-method medoid \
         ${seed_args[@]+"${seed_args[@]}"} \
-        --o-resampled-tables "$D/core/resampled_tables" \
-        --o-alpha-diversities "$D/core/alpha" \
-        --o-distance-matrices "$D/core/distance" \
-        --o-pcoas "$D/core/pcoa" \
-        --o-emperor-plots "$D/core/emperor" \
-        --o-scatter-plot "$D/core/scatter_plot.qzv"
+        --o-resampled-tables "$dir/resampled_tables" \
+        --o-alpha-diversities "$dir/alpha" \
+        --o-distance-matrices "$dir/distance" \
+        --o-pcoas "$dir/pcoa" \
+        --o-emperor-plots "$dir/emperor" \
+        --o-scatter-plot "$dir/scatter_plot.qzv"
+}
+core_metrics "$D/core" "$SAMPLING_DEPTH"
+if [[ -n "$SENS_DEPTH" && "$SENS_DEPTH" != "$SAMPLING_DEPTH" ]]; then
+    log "Sensitivity run at ${SENS_DEPTH} reads (samples dropped per group: $D/depth_by_group.tsv)"
+    core_metrics "$D/sensitivity/core" "$SENS_DEPTH"
 fi
 
 log "Alpha diversity tests (Kruskal-Wallis for categories, Spearman for numeric columns)"
