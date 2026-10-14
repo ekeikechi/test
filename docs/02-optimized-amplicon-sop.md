@@ -1064,15 +1064,15 @@ analysis uses `yes` (`export_photosynthetic/`); the sensitivity analysis adds `d
 **Adl et al. 2019 (Appendix S2), `R/adl2019_trophic.tsv`.** Adl, S. M. et al. 2019.
 Revisions to the classification, nomenclature, and diversity of eukaryotes. *J. Eukaryot.
 Microbiol.* 66:4–119, doi:10.1111/jeu.12691 (CC BY). Transcribed from the published PDF
-with the source table and printed page on every row (979 rows):
-- Table 2.1, 191 dinoflagellate genera (+1 species): L photosynthetic, M mixotrophic, B
+with the source table and printed page on every row (980 rows):
+- Table 2.1, 190 dinoflagellate genera and 1 species: L photosynthetic, M mixotrophic, B
   bacterivore, C cytotrophic, H heterotrophic; `?` and `( )` mark uncertainty. The authors
   stress that many assignments are informed guesses and that some genera vary between
   species.
 - Table 2.2, ciliate families and genera: B (default for all ciliates "except where noted"),
   O omnivore, C cytotroph, D detritus, F fungi, f filaments/algae, P predator, P*
   histophagous, X parasite, * commensal, S osmotroph.
-- 77 rules from the Appendix S2 text for other groups (e.g. Euglenophyceae photosynthetic or
+- 78 rules from the Appendix S2 text for other groups (e.g. Euglenophyceae photosynthetic or
   secondarily osmotrophic; Aphagea, *Astasia*, *Distigma* osmotrophic; Pirsoniales parasites
   of diatoms; *Viridiraptor* and Vampyrellida phycotrophic; Foraminifera mainly
   bacterivores), using PR2 5.1.1 names (e.g. Endomyxa-Phytomyxea, Chlorarachniophyceae).
