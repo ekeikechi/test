@@ -5,10 +5,10 @@ genus	Poteriospumella	ecological_function	phagotrophs	Colourless 'Spumella-like'
 genus	Goniomonas	ecological_function	phagotrophs	Plastid-less phagotrophic cryptomonad (Goniomonadea); PR2 5.1.1 labels it phototrophs	General literature; verify for your study
 genus	Hemiarma	ecological_function	phagotrophs	Plastid-less phagotrophic cryptist related to Goniomonas; PR2 5.1.1 labels it phototrophs	Shiratori & Ishida 2016, Protist 167 (Hemiarma marina); verify
 genus	Chilomonas	ecological_function	osmotrophs	Colourless cryptomonad (Cryptomonas paramecium) with a non-photosynthetic plastid; PR2 5.1.1 labels it phototrophs	Donaher et al. 2009, Genome Biol Evol 1:439-448
-genus	Polytoma	ecological_function	osmotrophs	Colourless chlamydomonad, non-photosynthetic; PR2 5.1.1 labels it phototrophs	Smith & Lee 2014, Plant Physiol 164:1812-1819 (non-photosynthetic Polytoma/Polytomella)
-genus	Polytomella	ecological_function	osmotrophs	Colourless chlamydomonad with a genome-less plastid; PR2 5.1.1 labels it phototrophs	Smith & Lee 2014, Plant Physiol 164:1812-1819
-genus	Prototheca	ecological_function	osmotrophs	Colourless trebouxiophyte (saprotroph, opportunistic pathogen); PR2 5.1.1 labels it phototrophs	General literature; verify for your study
-genus	Helicosporidium	ecological_function	parasites	Non-photosynthetic trebouxiophyte parasite of invertebrates; PR2 5.1.1 labels it phototrophs	de Koning & Keeling 2006, BMC Biol 4:12
+genus	Polytoma	ecological_function	osmotrophs	Colourless chlamydomonad, non-photosynthetic; PR2 5.1.1 labels it phototrophs	Adl et al. 2019, J Eukaryot Microbiol 66:4-119, Appendix S2 (p. 110); Smith & Lee 2014, Plant Physiol 164:1812-1819
+genus	Polytomella	ecological_function	osmotrophs	Colourless chlamydomonad with a genome-less plastid; PR2 5.1.1 labels it phototrophs	Adl et al. 2019, J Eukaryot Microbiol 66:4-119, Appendix S2 (p. 110); Smith & Lee 2014, Plant Physiol 164:1812-1819
+genus	Prototheca	ecological_function	osmotrophs	Colourless trebouxiophyte (saprotroph, opportunistic pathogen); PR2 5.1.1 labels it phototrophs	Adl et al. 2019, J Eukaryot Microbiol 66:4-119, Appendix S2 (p. 110)
+genus	Helicosporidium	ecological_function	parasites	Non-photosynthetic trebouxiophyte parasite of invertebrates; PR2 5.1.1 labels it phototrophs	Adl et al. 2019, J Eukaryot Microbiol 66:4-119, Appendix S2 (p. 110); de Koning & Keeling 2006, BMC Biol 4:12
 genus	Chromera	ecological_function	phototrophs	Photosynthetic chromerid; PR2 5.1.1 labels it phagotrophs	Moore et al. 2008, Nature 451:959-963
 genus	Vitrella	ecological_function	phototrophs	Photosynthetic chromerid; PR2 5.1.1 labels it phagotrophs	Obornik et al. 2012, Protist 163:306-323
 species	Paulinella_chromatophora	ecological_function	phototrophs	Photosynthetic (cyanobacterium-derived chromatophore); PR2 5.1.1 labels it phagotrophs	Marin et al. 2005, Protist 156:425-432

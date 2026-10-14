@@ -22,6 +22,8 @@ PER <- "Eukaryota;TSAR;Alveolata;Dinoflagellata;Dinophyceae;Peridiniales;Protope
 MES <- "Eukaryota;TSAR;Alveolata;Ciliophora;Litostomatea;Cyclotrichiida;Mesodiniidae;Mesodinium"
 MIC <- "Eukaryota;Archaeplastida;Chlorophyta;Chlorophyta_X;Trebouxiophyceae;Chlorellales;Chlorellaceae;Micractinium"
 SPA <- "Eukaryota;Archaeplastida;Streptophyta;Streptophyta_X;Embryophyceae;Poales;Poaceae;Spartina"
+GYM <- "Eukaryota;TSAR;Alveolata;Dinoflagellata;Dinophyceae;Gymnodiniales;Gymnodiniaceae"
+CIL <- "Eukaryota;TSAR;Alveolata;Ciliophora;Spirotrichea;Strombidiida"
 tax <- rbind(
   sp(NAV, "Navicula_a", "phototrophs", wm = 1, wb = 0, wf = 0, wt = 0),
   sp(NAV, "Navicula_b", "phototrophs", wm = 1, wb = 1, wf = 0, wt = 0),
@@ -42,7 +44,12 @@ tax <- rbind(
   sp(MIC, "Micractinium_a", "phototrophs", wm = 0, wb = 0, wf = 1, wt = 0),
   sp(MIC, "Micractinium_b", "phototrophs", wm = 0, wb = 0, wf = 1, wt = 0),
   sp(MIC, "Micractinium_c", "phototrophs", wm = 0, wb = 0, wf = 1, wt = 1),
-  sp(SPA, "Spartina_alterniflora", "phototrophs", wm = 1))
+  sp(SPA, "Spartina_alterniflora", "phototrophs", wm = 1),
+  sp(paste0(GYM, ";Gymnodinium"), "Gymnodinium_a", "dinoflagellates"),
+  sp(paste0(GYM, ";Amphidinium"), "Amphidinium_a", "dinoflagellates"),
+  sp(paste0(GYM, ";Unlisteddinium"), "Unlisteddinium_a", "dinoflagellates"),
+  sp(paste0(CIL, ";Strombidiidae;Strombidium"), "Strombidium_a", "phagotrophs"),
+  sp(paste0(CIL, ";Unlistedidae;Unlistedia"), "Unlistedia_a", "phagotrophs"))
 
 # reference sequences: one per species, three for Navicula_a with source records
 main <- tax[, lv]; main$gene <- "18S_rRNA"; main$organelle <- "nucleus"
@@ -81,7 +88,12 @@ asv <- c(
   asv11 = lin(NAV, "Navicula_newsp"),                 # species not in PR2 -> genus
   asv12 = "d__Eukaryota; sgr__TSAR; dv__Unknowndivision",   # -> supergroup, mixed
   asv13 = lin(PRO, "Prorocentrum_minimum"),           # HAB species, WoRMS/GBIF ids
-  asv14 = lin(NAV, "Navicula_a"))                     # evidence columns
+  asv14 = lin(NAV, "Navicula_a"),                     # evidence columns
+  asv15 = lin(paste0(GYM, ";Gymnodinium")),           # Adl Table 2.1 L M -> phototroph
+  asv16 = lin(paste0(GYM, ";Amphidinium")),           # Adl: species-level variation -> unresolved
+  asv17 = lin(paste0(GYM, ";Unlisteddinium")),        # not in Adl table -> unresolved
+  asv18 = lin(paste0(CIL, ";Strombidiidae;Strombidium")),  # Adl Table 2.2 genus row: O
+  asv19 = lin(paste0(CIL, ";Unlistedidae;Unlistedia")))    # ciliate default B
 write.table(data.frame(`Feature ID` = names(asv), Taxon = asv, Confidence = 0.95, check.names = FALSE),
             file.path(outdir, "export", "taxonomy.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
 smp <- sprintf("S%d", 1:6)

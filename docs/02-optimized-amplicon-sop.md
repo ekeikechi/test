@@ -31,7 +31,7 @@ explains the decisions; the scripts carry them out.
 | D13 | ANCOM-BC2 in QIIME 2 (ASV and the `TAXA_COLLAPSE_LEVEL` rank, genus by default); R consensus of ANCOM-BC2 + ALDEx2 + MaAsLin3 | `gut_to_soil_tutorial`, `MH_2026.3-R` | Current QIIME 2 method plus MH's multi-tool practice, with the same input to every tool. |
 | D14 | Export for R plus `replay-provenance` and `replay-supplement` | `MH_*`, `gut_to_soil_tutorial` | Portable data plus an exact methods record. |
 | D15 | DADA2 truncation chosen by hand from the quality plot, or **`auto`**: cut before the first position with median quality < 25 (or where < 75% of reads are that long), then lengthen the better read until F+R reaches the overlap target | Quality rule: nf-core/ampliseq (not one of the eight sources). Overlap target: PR2 V4 insert lengths, measured for this SOP | Reproducible, logged choice; the overlap target stops long-insert taxa from vanishing at merging without an error. |
-| D16 | PR2 traits for every ASV (18S + PR2 only): ecological function, mixoplankton type, HAB, WoRMS habitat, WoRMS/GBIF ids, source evidence and SILVA/UniEuk cross-names, taken from the PR2 species under the ASV's assigned taxon when ≥ 90% agree; a cited override list; land plants reported apart; a photosynthesis category | PR2 5.1.1 database (Sommeria-Klein et al. 2021; Mitra et al. 2023; WoRMS) — not one of the eight sources | Uses all of PR2's functional data with its provenance shown, and fixes the lineage-level errors that matter for photosynthetic protists |
+| D16 | PR2 traits for every ASV (18S + PR2 only): ecological function, mixoplankton type, HAB, WoRMS habitat, WoRMS/GBIF ids, source evidence and SILVA/UniEuk cross-names, taken from the PR2 species under the ASV's assigned taxon when ≥ 90% agree; a cited override list; land plants reported apart; a photosynthesis category, with dinoflagellates resolved by genus and diets for all groups from Adl et al. 2019 | PR2 5.1.1 database (Sommeria-Klein et al. 2021; Mitra et al. 2023; WoRMS) and Adl et al. 2019 Appendix S2 — not among the eight sources | Uses all of PR2's functional data with its provenance shown, and fixes the lineage-level errors that matter for photosynthetic protists |
 
 These are the generic (Illumina 16S) defaults. `PRESET="18S_PR2"` (§2.1) changes:
 - **D4:** 18S V4 primers.
@@ -1042,17 +1042,48 @@ phagotrophs; *Chilomonas*, *Polytoma*, *Polytomella*, *Prototheca* → osmotroph
 chromatophore-bearing *Paulinella* species → phototrophs. Rows marked "verify" cite
 general knowledge only.
 
-**`photo_category`** (one value per ASV, in this order):
+**`photo_category`** (one value per ASV, in this order; `photo_category_source` says
+whether PR2 or Adl et al. 2019 decided it):
 
 | Category | Rule |
 |---|---|
 | `plant` | class Embryophyceae (land plants: roots, pollen, detritus); reported apart |
 | `acquired_phototrophy` | mixoplankton pSNCM, GNCM or eSNCM |
-| `phototroph` | ecological_function phototrophs, or mixoplankton CM (own plastids) |
-| `dinoflagellate_unresolved` | dinoflagellates not flagged CM: trophic mode not resolvable from 18S |
-| `non_photosynthetic` | phagotrophs, parasites, metazoans, osmotrophs |
+| `phototroph` | ecological_function phototrophs; or mixoplankton CM (own plastids); or a dinoflagellate genus coded L or M, without H, in Adl et al. 2019 Table 2.1 |
+| `dinoflagellate_unresolved` | dinoflagellate not resolved: genus absent from Table 2.1, listed without codes, coded with H or species-variable (e.g. *Amphidinium*), or ASV classified above genus |
+| `non_photosynthetic` | phagotrophs, parasites, metazoans, osmotrophs; or a dinoflagellate genus coded only B, C or H in Table 2.1 |
 | `mixed_or_unknown` | species under the taxon disagree, or no PR2 trait data |
 | `unassigned` | ASV not classified |
+
+**`photosynthetic_capable`** is the manuscript-level set "all microbial eukaryotes capable
+of photosynthesis": `yes` = `phototroph` or `acquired_phototrophy`; `doubtful` =
+`dinoflagellate_unresolved`; `no`; `no (plant)`; `unknown`; `unassigned`. The main
+analysis uses `yes` (`export_photosynthetic/`); the sensitivity analysis adds `doubtful`
+(`export_photosynthetic_sensitivity/`).
+
+**Adl et al. 2019 (Appendix S2), `R/adl2019_trophic.tsv`.** Adl, S. M. et al. 2019.
+Revisions to the classification, nomenclature, and diversity of eukaryotes. *J. Eukaryot.
+Microbiol.* 66:4–119, doi:10.1111/jeu.12691 (CC BY). Transcribed from the published PDF
+with the source table and printed page on every row (979 rows):
+- Table 2.1, 191 dinoflagellate genera (+1 species): L photosynthetic, M mixotrophic, B
+  bacterivore, C cytotrophic, H heterotrophic; `?` and `( )` mark uncertainty. The authors
+  stress that many assignments are informed guesses and that some genera vary between
+  species.
+- Table 2.2, ciliate families and genera: B (default for all ciliates "except where noted"),
+  O omnivore, C cytotroph, D detritus, F fungi, f filaments/algae, P predator, P*
+  histophagous, X parasite, * commensal, S osmotroph.
+- 77 rules from the Appendix S2 text for other groups (e.g. Euglenophyceae photosynthetic or
+  secondarily osmotrophic; Aphagea, *Astasia*, *Distigma* osmotrophic; Pirsoniales parasites
+  of diatoms; *Viridiraptor* and Vampyrellida phycotrophic; Foraminifera mainly
+  bacterivores), using PR2 5.1.1 names (e.g. Endomyxa-Phytomyxea, Chlorarachniophyceae).
+
+Each ASV takes the row at its deepest rank that Adl lists (`adl2019_codes`,
+`adl2019_diet`, `adl2019_match` with table and page, `adl2019_note`). Adl changes
+`photo_category` only for dinoflagellates; for other groups PR2 (with the overrides)
+decides, and Adl adds the diet. Against PR2 5.1.1, Table 2.1 resolves 128 of 185 named
+Dinophyceae genera (96 photosynthetic, 32 not; 47% of Dinophyceae reference sequences);
+unnamed environmental lineages (47% of sequences) stay unresolved. For ciliates, 236 of 702
+PR2 genera match by genus, 200 more by family, and 266 take the default B.
 
 **Limits.** Traits are inherited from the assigned taxon, not measured: an ASV classified
 to genus gets the genus summary, and 18S presence says nothing about whether a cell was
@@ -1064,8 +1095,9 @@ current PR2 release; the script warns if it differs from the classifier's `PR2_V
 ```bash
 Rscript R/pr2_traits.R results/10_export results/11_traits
 # optional third argument: a local pr2.qs (or .rds) instead of downloading
-# then, the full analysis on phototrophs only:
-Rscript R/downstream_analysis.R results/11_traits/export_phototroph results/11_R_phototroph
+# then manuscript 1 (photosynthetic set) and its sensitivity version:
+Rscript R/downstream_analysis.R results/11_traits/export_photosynthetic results/11_R_photosynthetic
+Rscript R/downstream_analysis.R results/11_traits/export_photosynthetic_sensitivity results/11_R_photosynthetic_sens
 ```
 
 **Outputs** (`results/11_traits/`): `asv_traits.tsv` (one row per ASV, all columns above
@@ -1073,7 +1105,8 @@ plus `total_count`), `table_by_photo_category.tsv` and `table_by_ecological_func
 (reads per sample; `_relative` versions), `trait_summary.tsv` (ASVs and reads per
 category), `traits_settings.tsv` (PR2 version, overrides file, thresholds),
 `photo_category_by_sample.pdf`, `phototroph_share_by_group.pdf` (with `GROUP_COL`),
-`export_phototroph/` (stage 10-style export of `phototroph` ASVs), `pr2.qs` (cached).
+`table_by_photosynthetic_capable.tsv`, `export_photosynthetic/` and
+`export_photosynthetic_sensitivity/` (stage 10-style exports), `pr2.qs` (cached).
 
 **Check**
 - `trait_summary.tsv`: a large `mixed_or_unknown` share means many ASVs stop at high
@@ -1107,6 +1140,7 @@ Report these in the methods section:
 | First real-data run (2026.7, 18S V4, 216 samples) | Stages 1–3 on the user's server | Stage 1 completed. Stage 2 stopped: 2026.7 `cutadapt trim-paired` requires `--o-stats`. Fixed. A follow-up comparison of every plugin interface the pipeline calls (2026.4 vs 2026.7) found the stage 9 visualizer change too; also fixed. Stage 3: DADA2 completed (13 min, 24 threads); the `feature-table summarize` after it failed ("list index out of range") because the metadata had sample IDs only, which 2026.7 `summarize` cannot handle. The pipeline now passes metadata to `summarize` only when it has a data column, and draws grouped rarefaction curves (stage 6, same limitation in `alpha-rarefaction`) only when `GROUP_COL` is set. The test stub reproduces both failures. |
 | Automatic truncation (`auto_truncation.py`) | `tests/auto_truncation_test.sh`: 8 synthetic quality profiles with known answers (quality rule only; target already met; target forces lengthening; 2×250 reads that cannot reach the target; reads failing from position 1; stricter quality threshold), plus the decision table. Smoke test: chosen lengths reach DADA2 and the settings report; an unreachable target stops stage 3 before DADA2. Real data: the user's 2×301 18S V4 quality tables. | All pass. On the real tables the rule gives 282 / 250, the lengths chosen by hand for that run. |
 | PR2 traits (`R/pr2_traits.R`) | `tests/traits_check.sh`: synthetic PR2 database with 14 ASVs of known answer (every photo_category, an override, a class-level mixed taxon, a lineage missing from PR2 that falls back to supergroup, HAB at species and genus level, the habitat flag and its 3-species minimum, evidence columns, majority-rule SILVA name, phototroph-only export, read totals, version-mismatch warning): 28 checks. Real PR2 5.1.1: 317 pseudo-ASVs built from real lineages, then `downstream_analysis.R` on the phototroph-only export. | All pass. The real run took about 30 s; known taxa came out as expected (e.g. *Navicula*, *Gyrosigma* phototroph; *Paraphysomonas*, *Goniomonas* non-photosynthetic after override; *Chromera* phototroph after override; *Mallomonas* flagged as freshwater-only). |
+| Adl et al. 2019 trophic table | Transcribed from the PDF text layer and checked line by line against the page images (Table 2.1 printed pp. 112–113, Table 2.2 pp. 113–117, text pp. 110–112); PDF typos fixed (missing brackets for *Schmidingerella*, *Hartmannula*; *Ansanella* lost from the text layer). `tests/traits_check.sh` adds dinoflagellate cases (Table 2.1 C only → non-photosynthetic; L M → phototroph; species-variable genus and unlisted genus → unresolved), ciliate genus row and default B, the photosynthetic and sensitivity exports, and the unassigned case (44 checks in total). | All pass. Coverage against PR2 5.1.1 as stated in stage 11a. |
 | Stage 11 robustness | `tests/r_check.sh` scenario F: one metadata column, three groups. | Found and fixed: ANCOM-BC2 lost the group variable when the metadata had a single column (the previous script fails F with "variables … not in the meta data"). PCoA is now skipped with a message, instead of crashing, when a distance has fewer than two positive eigenvalues (e.g. a small subset in which every sample is identical by Jaccard). |
 | Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
 | R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |

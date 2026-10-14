@@ -25,11 +25,19 @@
 #   3. photo_category, from ecological_function + mixoplankton + class:
 #        plant                     Embryophyceae (land plants), always reported apart
 #        acquired_phototrophy      mixoplankton pSNCM, GNCM or eSNCM
-#        phototroph                ecological_function "phototrophs", or mixoplankton CM
-#        dinoflagellate_unresolved ecological_function "dinoflagellates" without CM
-#        non_photosynthetic        phagotrophs, parasites, metazoans, osmotrophs
+#        phototroph                ecological_function "phototrophs", or mixoplankton CM, or
+#                                  a dinoflagellate genus coded L/M (no H) in Adl et al. 2019
+#        dinoflagellate_unresolved dinoflagellate not resolved by CM or Adl Table 2.1 (genus not
+#                                  listed, coded with H or species-variable, or ASV above genus)
+#        non_photosynthetic        phagotrophs, parasites, metazoans, osmotrophs, or a
+#                                  dinoflagellate genus coded only B/C/H in Adl Table 2.1
 #        mixed_or_unknown          no agreement, or no PR2 trait data for the taxon
 #        unassigned                ASV not classified (no taxon)
+#      photosynthetic_capable (manuscript-1 set): yes = phototroph or acquired_phototrophy;
+#      doubtful = dinoflagellate_unresolved; no; no (plant); unknown.
+#      adl2019_*: codes, diet words and match from Adl et al. 2019 Appendix S2
+#      (R/adl2019_trophic.tsv): Table 2.1 dinoflagellate genera, Table 2.2 ciliate
+#      families/genera (ciliates not listed default to B), text rules for other groups.
 #   4. Evidence columns (ev_*): what the PR2 reference sequences of the taxon record about
 #      their source (biotic relationship, hosts, biome/material, habitat keywords,
 #      share from cultures, geography). Descriptive, sparse and biased toward well-sampled
@@ -46,8 +54,8 @@
 # Outputs (OUT_DIR): asv_traits.tsv, table_by_photo_category.tsv,
 #   table_by_ecological_function.tsv (+ _relative), trait_summary.tsv,
 #   traits_settings.tsv, photo_category_by_sample.pdf, phototroph_share_by_group.pdf,
-#   export_phototroph/ (stage 10-style export of phototroph ASVs only, for
-#   R/downstream_analysis.R).
+#   table_by_photosynthetic_capable.tsv, export_photosynthetic/ and
+#   export_photosynthetic_sensitivity/ (stage 10-style exports for R/downstream_analysis.R).
 # =============================================================================
 
 args <- commandArgs(trailingOnly = TRUE)
@@ -57,6 +65,7 @@ cfg <- list(
   pr2_file   = if (length(args) >= 3) args[[3]] else NULL,
   pr2_url    = "https://storage.googleapis.com/pr2database-data/pr2database/data-qs/pr2.qs",
   overrides  = NULL,                 # default: pr2_trait_overrides.tsv next to this script
+  adl        = NULL,                 # default: adl2019_trophic.tsv next to this script
   ranks      = c("Domain", "Supergroup", "Division", "Subdivision", "Class", "Order",
                  "Family", "Genus", "Species"),
   min_agreement  = 0.9,              # TRAIT_MIN_AGREEMENT
@@ -90,6 +99,10 @@ if (nzchar(cfg$sample_habitat) &&
 if (is.null(cfg$overrides)) {
   here <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
   cfg$overrides <- file.path(if (is.na(here)) "R" else dirname(here), "pr2_trait_overrides.tsv")
+}
+if (is.null(cfg$adl)) {
+  here <- sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])
+  cfg$adl <- file.path(if (is.na(here)) "R" else dirname(here), "adl2019_trophic.tsv")
 }
 dir.create(cfg$out_dir, showWarnings = FALSE, recursive = TRUE)
 out <- function(...) file.path(cfg$out_dir, ...)
@@ -146,6 +159,56 @@ for (i in seq_len(nrow(ov))) {
 }
 say("Overrides applied: %d of %d rules (%s)", sum(ov$taxon %in% unlist(tax[PR2_LEVELS])),
     nrow(ov), cfg$overrides)
+
+# ---- Adl et al. 2019 trophic assignments -----------------------------------------
+# Appendix S2 of Adl et al. 2019 (J Eukaryot Microbiol 66:4-119, CC BY): Table 2.1
+# (dinoflagellate genera: L photosynthetic, M mixotrophic, B bacterivore, C cytotrophic,
+# H heterotrophic), Table 2.2 (ciliate families/genera: B, O omnivore, C, D detritus,
+# F fungi, f filaments/algae, P predator, P* histophagous, X parasite, * commensal,
+# S osmotroph) and the text rules for other groups, transcribed in adl2019_trophic.tsv.
+adl <- read.delim(cfg$adl, colClasses = "character", quote = "", na.strings = character(0))
+adl_by <- split(seq_len(nrow(adl)), paste(adl$rank, adl$taxon))
+ADL_WORDS <- c(L = "photosynthetic", M = "mixotroph", B = "bacterivore", O = "omnivore",
+               C = "cytotroph", D = "detritivore", F = "mycotroph", f = "phycotroph",
+               P = "predator", "P*" = "histophagous", X = "parasite", "*" = "commensal",
+               S = "osmotroph", H = "heterotroph")
+adl_diet <- function(codes) {
+  tok <- strsplit(trimws(gsub("[,]", " ", codes)), "\\s+")[[1]]
+  tok <- tok[nzchar(tok) & tok != "or"]
+  if (!length(tok)) return("")
+  w <- ADL_WORDS[gsub("[()?]", "", tok)]
+  w <- ifelse(grepl("[()?]", tok), paste0(w, "?"), w)
+  paste(unique(w[!is.na(w)]), collapse = ", ")
+}
+# deepest rank of the ASV lineage with an Adl row; ciliates default to B (Table 2.2 header)
+adl_lookup <- function(lab) {
+  for (l in rev(seq_along(lab))) {
+    i <- adl_by[[paste(PR2_LEVELS[l], lab[l])]]
+    if (!is.null(i)) {
+      r <- adl[i[1], ]
+      return(list(codes = r$codes, rank = PR2_LEVELS[l], taxon = r$taxon,
+                  match = sprintf("%s %s (%s, p. %s)", PR2_LEVELS[l], r$taxon, r$source,
+                                  ifelse(nzchar(r$page), r$page, "113-117")),
+                  note = r$note, source = r$source))
+    }
+  }
+  if (length(lab) >= 4 && lab[4] == "Ciliophora")
+    return(list(codes = "B", rank = "", taxon = "", source = "default",
+                match = "Ciliophora default (Table 2.2: all genera feed on bacteria by filtration except where noted)",
+                note = ""))
+  NULL
+}
+# Photosynthesis of a dinoflagellate genus from its Table 2.1 codes
+adl_photosynthesis <- function(a) {
+  if (is.null(a) || a$source != "Table 2.1") return("not_in_table")
+  tok <- gsub("[()?]", "", strsplit(trimws(a$codes), "\\s+")[[1]])
+  tok <- tok[nzchar(tok)]
+  if (!length(tok)) return("unknown")
+  photo <- any(tok %in% c("L", "M")); hetero <- "H" %in% tok
+  if (photo && (hetero || grepl("species-level variation", a$note))) "variable"
+  else if (photo) "yes" else "no"
+}
+say("Adl et al. 2019 trophic table: %d rows (%s)", nrow(adl), cfg$adl)
 
 # ---- lineage keys -------------------------------------------------------------
 lineage_keys <- function(m) {          # m: character matrix, one column per level
@@ -223,12 +286,13 @@ hab_count <- function(v) sum(v %in% 1)   # species with a WoRMS record in that h
 annotate <- function(lab) {
   d <- length(lab)
   res <- list(assigned_rank = if (d) cfg$ranks[d] else "", assigned_taxon = if (d) lab[d] else "")
-  if (!d) return(c(res, photo_category = "unassigned"))
+  if (!d) return(c(res, photo_category = "unassigned", photosynthetic_capable = "unassigned"))
   key <- paste(lab, collapse = ";")
   # deepest level (<= d) of this lineage present in PR2's taxonomy table
   lvl <- d; rows <- tax_index[[d]][[key]]
   while (is.null(rows) && lvl > 1) { lvl <- lvl - 1; rows <- tax_index[[lvl]][[paste(lab[1:lvl], collapse = ";")]] }
-  if (is.null(rows)) return(c(res, trait_rank = "", n_pr2_species = 0L, photo_category = "mixed_or_unknown"))
+  if (is.null(rows)) return(c(res, trait_rank = "", n_pr2_species = 0L, photo_category = "mixed_or_unknown",
+                             photosynthetic_capable = "unknown"))
   t <- tax[rows, , drop = FALSE]
   eco <- top_value(t$ecological_function, cfg$min_agreement)
   mixo <- top_value(ifelse(is.na(t$mixoplankton), "not_listed", t$mixoplankton), cfg$min_agreement)
@@ -247,12 +311,23 @@ annotate <- function(lab) {
                       cfg$sample_habitat, nrow(w))
   }
   plant <- d >= 5 && lab[5] == "Embryophyceae"
+  a <- adl_lookup(lab)
+  # Table 2.1 decides only for an ASV assigned to that genus (or species)
+  adl_ph <- if (!is.null(a) && a$source == "Table 2.1" && a$rank %in% c("genus", "species"))
+    adl_photosynthesis(a) else "not_in_table"
+  photo_src <- "PR2"
   photo <- if (plant) "plant"
     else if (mixo$value %in% c("pSNCM", "GNCM", "eSNCM")) "acquired_phototrophy"
     else if (eco$value %in% "phototrophs" || mixo$value %in% "CM") "phototroph"
-    else if (eco$value %in% "dinoflagellates") "dinoflagellate_unresolved"
+    else if (eco$value %in% "dinoflagellates") {
+      photo_src <- if (adl_ph %in% c("yes", "no")) "Adl et al. 2019 Table 2.1" else "PR2"
+      switch(adl_ph, yes = "phototroph", no = "non_photosynthetic", "dinoflagellate_unresolved")
+    }
     else if (eco$value %in% c("phagotrophs", "parasites", "metazoans", "osmotrophs")) "non_photosynthetic"
     else "mixed_or_unknown"
+  capable <- switch(photo, phototroph = "yes", acquired_phototrophy = "yes",
+                    dinoflagellate_unresolved = "doubtful", plant = "no (plant)",
+                    non_photosynthetic = "no", "unknown")
   m_rows <- main_index[[lvl]][[paste(lab[1:lvl], collapse = ";")]]
   if (is.null(m_rows)) m_rows <- integer(0)
   st_type <- main$pr2_sample_type[m_rows]; st_type <- st_type[!is.na(st_type)]
@@ -264,7 +339,13 @@ annotate <- function(lab) {
     ecological_function = eco$value, ecological_function_agreement = eco$agreement,
     ecological_function_n = eco$n,
     mixoplankton = mixo$value, mixoplankton_agreement = mixo$agreement,
-    photo_category = photo,
+    photo_category = photo, photo_category_source = photo_src,
+    photosynthetic_capable = capable,
+    adl2019_codes = if (is.null(a)) "" else a$codes,
+    adl2019_diet = if (is.null(a)) "" else adl_diet(a$codes),
+    adl2019_photosynthesis = adl_ph,
+    adl2019_match = if (is.null(a)) "" else a$match,
+    adl2019_note = if (is.null(a)) "" else a$note,
     HAB = if (sp_level) (if (length(hab_sp)) "HAB species" else "no")
           else if (length(hab_sp)) sprintf("taxon contains %d HAB species", length(hab_sp)) else "no",
     HAB_species = paste(head(hab_sp, 5), collapse = "; "),
@@ -320,6 +401,7 @@ collapse_by <- function(field) {
 }
 rel_photo <- collapse_by("photo_category")
 invisible(collapse_by("ecological_function"))
+invisible(collapse_by("photosynthetic_capable"))
 
 summ <- do.call(rbind, lapply(split(traits, traits$photo_category), function(d)
   data.frame(photo_category = d$photo_category[1], n_asvs = nrow(d),
@@ -342,18 +424,24 @@ write.table(data.frame(
             cfg$min_agreement, cfg$sample_habitat, cfg$habitat_min_species, format(Sys.time()))),
   out("traits_settings.tsv"), sep = "\t", quote = FALSE, row.names = FALSE)
 
-# ---- phototroph-only export (input for R/downstream_analysis.R) ---------------------
-sub_dir <- out("export_phototroph")
-dir.create(sub_dir, showWarnings = FALSE)
-keep_ids <- traits$feature_id[traits$photo_category == "phototroph"]
-keep <- c(1, 2, 2 + which(sub("\t.*", "", ft_lines[-(1:2)]) %in% keep_ids))
-writeLines(ft_lines[keep], file.path(sub_dir, "feature-table.tsv"))
-write.table(tx[tx[[1]] %in% keep_ids, , drop = FALSE], file.path(sub_dir, "taxonomy.tsv"),
-            sep = "\t", quote = FALSE, row.names = FALSE)
-for (f in c("metadata.tsv", "analysis_settings.tsv"))
-  if (file.exists(file.path(cfg$export_dir, f)))
-    file.copy(file.path(cfg$export_dir, f), file.path(sub_dir, f), overwrite = TRUE)
-say("Phototroph-only export: %d ASVs in %s", length(keep_ids), sub_dir)
+# ---- photosynthetic-only exports (input for R/downstream_analysis.R) ----------------
+#   export_photosynthetic/              photosynthetic_capable == "yes"
+#   export_photosynthetic_sensitivity/  "yes" plus "doubtful" (unresolved dinoflagellates)
+write_subset <- function(name, keep_ids) {
+  sub_dir <- out(name)
+  dir.create(sub_dir, showWarnings = FALSE)
+  keep <- c(1, 2, 2 + which(sub("\t.*", "", ft_lines[-(1:2)]) %in% keep_ids))
+  writeLines(ft_lines[keep], file.path(sub_dir, "feature-table.tsv"))
+  write.table(tx[tx[[1]] %in% keep_ids, , drop = FALSE], file.path(sub_dir, "taxonomy.tsv"),
+              sep = "\t", quote = FALSE, row.names = FALSE)
+  for (f in c("metadata.tsv", "analysis_settings.tsv"))
+    if (file.exists(file.path(cfg$export_dir, f)))
+      file.copy(file.path(cfg$export_dir, f), file.path(sub_dir, f), overwrite = TRUE)
+  say("%s: %d ASVs", sub_dir, length(keep_ids))
+}
+write_subset("export_photosynthetic", traits$feature_id[traits$photosynthetic_capable %in% "yes"])
+write_subset("export_photosynthetic_sensitivity",
+             traits$feature_id[traits$photosynthetic_capable %in% c("yes", "doubtful")])
 
 # ---- plots ---------------------------------------------------------------------------
 if (requireNamespace("ggplot2", quietly = TRUE)) {
