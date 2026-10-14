@@ -71,6 +71,26 @@ DADA2_TRIM_LEFT_R=0
 DADA2_TRUNC_F=""                          # e.g. 240  (single-end: only this one is used)
 DADA2_TRUNC_R=""                          # e.g. 200  (use 0 for both on ITS: variable length)
 DADA2_POOLING="independent"               # independent | pseudo
+
+# Automatic truncation: set BOTH DADA2_TRUNC_F and DADA2_TRUNC_R to "auto" (single-end:
+# DADA2_TRUNC_F only). Stage 03 then reads the per-position quality of the trimmed reads
+# (02_trim/reads_trimmed_summary) and, for each read direction, cuts before the first
+# position whose median quality is below DADA2_TRUNC_MIN_MEDIAN_Q, or earlier where fewer
+# than DADA2_TRUNC_MIN_READ_FRACTION of reads are that long (the nf-core/ampliseq rule).
+# Paired reads: if the two cuts add up to less than DADA2_TRUNC_SUM_TARGET, the read
+# with the better quality at its next position is lengthened, one position at a time,
+# up to its read length. If the target cannot be reached, stage 03 stops and says so.
+# Every decision is written to 03_denoise/truncation_auto.tsv and the stage log.
+DADA2_TRUNC_MIN_MEDIAN_Q=25
+DADA2_TRUNC_MIN_READ_FRACTION=0.75
+# F + R needed for merging: longest insert (after primer removal) that must merge + 12.
+# "" = no overlap check (the quality rule alone; stage 03 warns). 18S V4 with the
+# CYGCGG.../AYGGTA... primers: 520 (PR2: 95% of sequences, 92% of genera can merge).
+DADA2_TRUNC_SUM_TARGET=""
+# Expected-error filter (DADA2 default 2 for both). Raising DADA2_MAX_EE_R keeps more
+# reverse reads when their tails are poor; the denoising stats show whether it is needed.
+DADA2_MAX_EE_F=2
+DADA2_MAX_EE_R=2
 # Deblur: trim length from the length-percentile table of the merged reads.
 DEBLUR_TRIM_LENGTH=""                     # e.g. 366 for V4-V5 [MH_2026.3-workflow]
 DEBLUR_REF_SEQS=""                        # required for 18S/ITS: positive-filter reference (.qza)
@@ -137,6 +157,9 @@ if [[ "$PRESET" == "18S_PR2" ]]; then
     preset PRIMER_F             "GTGYCAGCMGCCGCGGTAA"  "CYGCGGTAATTCCAGCTC"     # 18S V4
     preset PRIMER_R             "CCGYCAATTYMTTTRAGTTT" "AYGGTATCTRATCRTCTTYG"
     preset DADA2_POOLING        "independent" "pseudo"   # helps rare ASVs seen in several samples
+    preset DADA2_TRUNC_F        ""      "auto"            # quality rule + overlap target below
+    preset DADA2_TRUNC_R        ""      "auto"
+    preset DADA2_TRUNC_SUM_TARGET "" "520"                # 2x300 V4: 95% of PR2 sequences merge
     preset TREE_METHOD          "auto"  "none"            # no reliable tree across all eukaryotes
     preset RUN_KMER_DIVERSITY   "no"    "yes"             # tree-free relatedness-aware metrics
     preset MIN_SAMPLES          "2"     "1"               # keep taxa found at a single site

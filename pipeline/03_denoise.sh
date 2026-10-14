@@ -8,7 +8,9 @@ source "$(dirname "$0")/lib.sh"
 D="${OUT}/03_denoise"; mkdir -p "$D"
 show_settings "$D" \
     PLATFORM LAYOUT MARKER DENOISER DADA2_TRIM_LEFT_F DADA2_TRIM_LEFT_R \
-    DADA2_TRUNC_F DADA2_TRUNC_R DADA2_POOLING DEBLUR_TRIM_LENGTH DEBLUR_REF_SEQS \
+    DADA2_TRUNC_F DADA2_TRUNC_R DADA2_TRUNC_MIN_MEDIAN_Q DADA2_TRUNC_MIN_READ_FRACTION \
+    DADA2_TRUNC_SUM_TARGET DADA2_MAX_EE_F DADA2_MAX_EE_R DADA2_POOLING \
+    DEBLUR_TRIM_LENGTH DEBLUR_REF_SEQS \
     CCS_FRONT CCS_ADAPTER CCS_MIN_LEN CCS_MAX_LEN CCS_MAX_EE NCORES
 
 if [[ "$PLATFORM" == "pacbio" ]]; then
@@ -17,6 +19,42 @@ else
     IN="${OUT}/02_trim/reads_trimmed.qza"
 fi
 [[ -e "$IN" ]] || die "Input not found: $IN (run the previous stage first)."
+
+# auto_truncation SUMMARY_QZV: replace DADA2_TRUNC_F/R ("auto") with lengths chosen by
+# auto_truncation.py from the trimmed reads' per-position quality; see config.sh.
+auto_truncation() {
+    local qzv="$1" sumdir="${OUT}/02_trim/reads_trimmed_summary" dec="$D/truncation_auto.tsv"
+    local picked args
+    [[ "$LAYOUT" != "paired" || ( "$DADA2_TRUNC_F" == auto && "$DADA2_TRUNC_R" == auto ) ]] \
+        || die "Set both DADA2_TRUNC_F and DADA2_TRUNC_R to \"auto\", or both to numbers."
+    [[ -e "$qzv" ]] || die "Automatic truncation needs ${qzv} (run stage 02 first)."
+    have "$sumdir/forward-seven-number-summaries.tsv" || run qiime tools export \
+        --input-path "$qzv" --output-path "$sumdir"
+    args=(--forward "$sumdir/forward-seven-number-summaries.tsv"
+          --min-median-q "$DADA2_TRUNC_MIN_MEDIAN_Q"
+          --min-read-fraction "$DADA2_TRUNC_MIN_READ_FRACTION" --out "$dec")
+    if [[ "$LAYOUT" == "paired" ]]; then
+        args+=(--reverse "$sumdir/reverse-seven-number-summaries.tsv")
+        if [[ -n "$DADA2_TRUNC_SUM_TARGET" ]]; then
+            args+=(--sum-target "$DADA2_TRUNC_SUM_TARGET")
+        else
+            log "WARNING: DADA2_TRUNC_SUM_TARGET is empty, so the automatic truncation does not"
+            log "check that read pairs can still merge. Check the merged column of denoising_stats."
+        fi
+    fi
+    log "Choosing truncation lengths automatically (quality rule; decisions in ${dec})"
+    picked="$(python3 "${PIPELINE_DIR}/auto_truncation.py" "${args[@]}")" \
+        || die "Automatic truncation stopped; see the message above and ${dec}."
+    read -r DADA2_TRUNC_F DADA2_TRUNC_R <<< "$picked"
+    awk -F'\t' 'NR > 1 { printf "  %-32s %s\n", $1, $2 }' "$dec" >&2
+    # record the chosen lengths in place of "auto" in this stage's settings report
+    awk -F'\t' -v OFS='\t' -v f="$DADA2_TRUNC_F" -v r="${DADA2_TRUNC_R:-}" '
+        ($1 == "DADA2_TRUNC_F" || ($1 == "DADA2_TRUNC_R" && r != "")) && $2 == "auto" {
+            $3 = "auto, chosen in truncation_auto.tsv; " $3; $2 = ($1 == "DADA2_TRUNC_F" ? f : r) }
+        { print }' "$D/settings_used.tsv" > "$D/settings_used.tsv.new"
+    mv "$D/settings_used.tsv.new" "$D/settings_used.tsv"
+    log "Automatic truncation: DADA2_TRUNC_F=${DADA2_TRUNC_F}${DADA2_TRUNC_R:+ DADA2_TRUNC_R=${DADA2_TRUNC_R}}"
+}
 
 dada2_outputs=(
     --o-table "$D/table.qza"
@@ -41,15 +79,19 @@ if [[ "$PLATFORM" == "pacbio" ]]; then
 
 elif [[ "$DENOISER" == "dada2" ]]; then
     TRIMMED_QZV="${OUT}/02_trim/reads_trimmed_summary.qzv"
-    need DADA2_TRUNC_F "Choose it from the Interactive Quality Plot in ${TRIMMED_QZV}."
+    need DADA2_TRUNC_F "Choose it from the Interactive Quality Plot in ${TRIMMED_QZV}, or use \"auto\"."
+    [[ "$LAYOUT" == "paired" ]] && need DADA2_TRUNC_R "Choose it from the Interactive Quality Plot in ${TRIMMED_QZV}, or use \"auto\"."
+    if [[ "$DADA2_TRUNC_F" == auto || ( "$LAYOUT" == "paired" && "$DADA2_TRUNC_R" == auto ) ]]; then
+        auto_truncation "$TRIMMED_QZV"
+    fi
     if [[ "$LAYOUT" == "paired" ]]; then
-        need DADA2_TRUNC_R "Choose it from the Interactive Quality Plot in ${TRIMMED_QZV}."
         log "DADA2 denoise-paired (merging, chimera removal and phiX filtering are built in)"
         log "Reminder: trunc-len-f + trunc-len-r must exceed the trimmed amplicon length by >= 12 nt."
         have "$D/table.qza" || run qiime dada2 denoise-paired \
             --i-demultiplexed-seqs "$IN" \
             --p-trim-left-f "$DADA2_TRIM_LEFT_F" --p-trim-left-r "$DADA2_TRIM_LEFT_R" \
             --p-trunc-len-f "$DADA2_TRUNC_F" --p-trunc-len-r "$DADA2_TRUNC_R" \
+            --p-max-ee-f "$DADA2_MAX_EE_F" --p-max-ee-r "$DADA2_MAX_EE_R" \
             --p-pooling-method "$DADA2_POOLING" \
             --p-n-threads "$NCORES" \
             "${dada2_outputs[@]}"
@@ -59,6 +101,7 @@ elif [[ "$DENOISER" == "dada2" ]]; then
             --i-demultiplexed-seqs "$IN" \
             --p-trim-left "$DADA2_TRIM_LEFT_F" \
             --p-trunc-len "$DADA2_TRUNC_F" \
+            --p-max-ee "$DADA2_MAX_EE_F" \
             --p-pooling-method "$DADA2_POOLING" \
             --p-n-threads "$NCORES" \
             "${dada2_outputs[@]}"

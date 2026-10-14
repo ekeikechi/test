@@ -68,7 +68,7 @@ show_settings() {
     } > "$dir/settings_used.tsv"
     printf '\n[%s] Settings used by %s (preset: %s)\n' \
         "$(date '+%H:%M:%S')" "$(basename "$0")" "${PRESET:-none}" >&2
-    awk -F'\t' 'NR > 1 { printf "  %-22s = %-40s (%s)\n", $1, ($2 == "" ? "<empty>" : $2), $3 }' \
+    awk -F'\t' 'NR > 1 { printf "  %-30s = %-40s (%s)\n", $1, ($2 == "" ? "<empty>" : $2), $3 }' \
         "$dir/settings_used.tsv" >&2
 }
 

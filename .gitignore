@@ -10,3 +10,4 @@ results/
 .Rhistory
 .RData
 .Rproj.user/
+__pycache__/

@@ -8,9 +8,9 @@ amplicon documentation, then combines them into one optimized, runnable workflow
 |---|---|
 | [`docs/01-workflow-comparison.md`](docs/01-workflow-comparison.md) | Step-by-step comparison of all eight sources: tools, parameters and defaults; what changed between MH 2024.5 and MH 2026.3 and across QIIME 2 releases; 20 errata with evidence; recommended resolutions |
 | [`docs/02-optimized-amplicon-sop.md`](docs/02-optimized-amplicon-sop.md) | The combined SOP: decisions and rationale, installation, eleven stages with checkpoints, reporting checklist, validation status. Every step cites its source label. |
-| [`pipeline/`](pipeline) | `config.sh` (all settings and decisions, plus an `18S_PR2` preset), `lib.sh`, stage scripts `01_…10_` and optional `05a_build_pr2_classifier.sh` (QIIME 2 2026.7; 2026.1 supported; bash 3.2+) |
+| [`pipeline/`](pipeline) | `config.sh` (all settings and decisions, plus an `18S_PR2` preset), `lib.sh`, stage scripts `01_…10_`, optional `05a_build_pr2_classifier.sh`, and `auto_truncation.py` (automatic DADA2 truncation) (QIIME 2 2026.7; 2026.1 supported; bash 3.2+) |
 | [`R/downstream_analysis.R`](R/downstream_analysis.R) | Stage 11: phyloseq/vegan diversity, composition plots, and an ANCOM-BC2 + ALDEx2 + MaAsLin3 differential-abundance consensus |
-| [`tests/`](tests) | `smoke_test.sh` (9 pipeline configurations against stub `qiime`/`biom`, with assertions on commands, presets and settings reports; the stub rejects commands whose interface differs in the configured QIIME 2 release), `r_check.sh` (R script on synthetic 16S and PR2 data with known answers, plus negative checks) |
+| [`tests/`](tests) | `smoke_test.sh` (11 pipeline configurations against stub `qiime`/`biom`, with assertions on commands, presets and settings reports; the stub rejects commands whose interface differs in the configured QIIME 2 release), `r_check.sh` (R script on synthetic 16S and PR2 data with known answers, plus negative checks), `auto_truncation_test.sh` (automatic DADA2 truncation on synthetic quality profiles) |
 
 ## Sources (labels used throughout)
 
@@ -57,7 +57,7 @@ Rscript R/downstream_analysis.R results/10_export results/11_R   # reads ranks, 
 
 ## Validation status
 
-The bash pipeline was checked with `shellcheck` and dry-run through nine configurations
+The bash pipeline was checked with `shellcheck` and dry-run through eleven configurations
 against command stubs, on bash 5.2 and 4.3. Every `qiime` command and parameter was read against the plugin source
 at the matching release tags. The R script was run end to end on synthetic data, where it
 recovered exactly the known differentially abundant genera. The first run on real data

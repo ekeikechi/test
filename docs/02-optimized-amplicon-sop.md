@@ -30,10 +30,12 @@ explains the decisions; the scripts carry them out.
 | D12 | PERMANOVA (pairwise) **+ PERMDISP** + multi-factor `adonis` | `moving_pictures_tutorial`, `MH_2026.3-stats-visualization`, `MH_2026.3-R` | Not in any source: the dispersion check is needed to interpret PERMANOVA. |
 | D13 | ANCOM-BC2 in QIIME 2 (ASV and the `TAXA_COLLAPSE_LEVEL` rank, genus by default); R consensus of ANCOM-BC2 + ALDEx2 + MaAsLin3 | `gut_to_soil_tutorial`, `MH_2026.3-R` | Current QIIME 2 method plus MH's multi-tool practice, with the same input to every tool. |
 | D14 | Export for R plus `replay-provenance` and `replay-supplement` | `MH_*`, `gut_to_soil_tutorial` | Portable data plus an exact methods record. |
+| D15 | DADA2 truncation chosen by hand from the quality plot, or **`auto`**: cut before the first position with median quality < 25 (or where < 75% of reads are that long), then lengthen the better read until F+R reaches the overlap target | Quality rule: nf-core/ampliseq (not one of the eight sources). Overlap target: PR2 V4 insert lengths, measured for this SOP | Reproducible, logged choice; the overlap target stops long-insert taxa from vanishing at merging without an error. |
 
 These are the generic (Illumina 16S) defaults. `PRESET="18S_PR2"` (§2.1) changes:
 - **D4:** 18S V4 primers.
 - **D5:** DADA2 pseudo-pooling.
+- **D15:** automatic truncation with an overlap target of F+R ≥ 520 nt.
 - **D6:** `MIN_SAMPLES=1`; the 0.1% rule stays on.
 - **D7:** a PR2 classifier built in stage 05a.
 - **D8:** excludes `d__Bacteria`, `d__Archaea` and PR2's organelle tags instead of mitochondria/chloroplast.
@@ -306,6 +308,40 @@ For **18S V4**, amplicon length varies across eukaryote groups. If the truncatio
 are too short for the longer amplicons, those reads fail to merge and their taxa vanish
 without an error. Check the *merged* column per sample in `denoising_stats.qzv`.
 
+**Automatic truncation** (D15; on by default with `PRESET="18S_PR2"`). Set
+`DADA2_TRUNC_F="auto"` and `DADA2_TRUNC_R="auto"` (single-end: `DADA2_TRUNC_F` only).
+Stage 3 exports the per-position quality of the trimmed reads
+(`02_trim/reads_trimmed_summary/forward-` and `reverse-seven-number-summaries.tsv`, from
+the 10,000 reads `demux summarize` samples) and runs `pipeline/auto_truncation.py`:
+
+1. **Quality cut** (per read): the last position before the first one whose median
+   quality is below `DADA2_TRUNC_MIN_MEDIAN_Q` (25).
+2. **Length cut** (per read): the last position that at least
+   `DADA2_TRUNC_MIN_READ_FRACTION` (75%) of reads reach. DADA2 discards reads shorter than
+   the truncation length, so the cut never goes past this.
+3. Each read is truncated at the smaller of the two. Steps 1–3 are the nf-core/ampliseq
+   rule.
+4. **Overlap target** (paired reads, when `DADA2_TRUNC_SUM_TARGET` is set): if F + R is
+   below the target, the read whose next position has the higher median quality is
+   lengthened one position at a time, up to its length cut. The target is the longest
+   insert that must merge plus 12 nt. For 18S V4 with these primers it is **520**: with
+   F + R = 520, 95.1% of PR2 V4 sequences and 92.0% of PR2 genera can merge (2×300 reads,
+   untruncated: 97.1% and 95.8%).
+5. If the target cannot be reached (e.g. 2×250 reads for 18S V4), stage 3 stops before
+   DADA2 and names three ways forward: a lower target (accepting the loss of long-insert
+   taxa), lengths set by hand, or forward reads only.
+
+Every input, cut, reason and the final F + R are written to
+`03_denoise/truncation_auto.tsv` and printed in the stage log; the settings report shows the
+chosen lengths as `auto, chosen in truncation_auto.tsv`. Numbers in `DADA2_TRUNC_F/R`
+always take precedence. On the first real 18S V4 run of this SOP (2×301 MiSeq, 216 samples)
+the rule gave **282 / 250** (F + R = 532), so the overlap target did not need to lengthen
+either read.
+
+`DADA2_MAX_EE_F`/`DADA2_MAX_EE_R` (default 2, the DADA2 default) set the expected-error
+filter. If many reads fail the filter in `denoising_stats.qzv` because reverse-read tails
+are poor, raising `DADA2_MAX_EE_R` (e.g. to 3) keeps more reads without shortening R.
+
 For **ITS**, amplicon length varies a lot. Use `trunc_len 0` for both reads and rely on
 `max_ee` (general DADA2 practice for ITS, not taken from the sources).
 
@@ -349,7 +385,8 @@ bash pipeline/03_denoise.sh
 ```
 
 It stops and names the file to inspect if `DADA2_TRUNC_F`/`DADA2_TRUNC_R` (DADA2) or
-`DEBLUR_TRIM_LENGTH` (Deblur) is still empty.
+`DEBLUR_TRIM_LENGTH` (Deblur) is still empty. With `DADA2_TRUNC_F/R="auto"` it chooses
+the lengths itself (see above).
 
 **What it runs: DADA2, Illumina paired-end (default)**
 
@@ -358,13 +395,21 @@ qiime dada2 denoise-paired \
   --i-demultiplexed-seqs results/02_trim/reads_trimmed.qza \
   --p-trim-left-f $DADA2_TRIM_LEFT_F --p-trim-left-r $DADA2_TRIM_LEFT_R \
   --p-trunc-len-f $DADA2_TRUNC_F --p-trunc-len-r $DADA2_TRUNC_R \
+  --p-max-ee-f $DADA2_MAX_EE_F --p-max-ee-r $DADA2_MAX_EE_R \
   --p-pooling-method $DADA2_POOLING \
   --p-n-threads $NCORES \
   --o-table results/03_denoise/table.qza \
   --o-representative-sequences results/03_denoise/rep_seqs.qza \
   --o-denoising-stats results/03_denoise/denoising_stats.qza \
   --o-base-transition-stats results/03_denoise/base_transition_stats.qza
-# single-end: qiime dada2 denoise-single with --p-trim-left / --p-trunc-len
+# single-end: qiime dada2 denoise-single with --p-trim-left / --p-trunc-len / --p-max-ee
+# DADA2_TRUNC_F/R="auto": first, if not already exported,
+#   qiime tools export --input-path results/02_trim/reads_trimmed_summary.qzv \
+#     --output-path results/02_trim/reads_trimmed_summary
+#   python3 pipeline/auto_truncation.py --forward .../forward-seven-number-summaries.tsv \
+#     --reverse .../reverse-seven-number-summaries.tsv --min-median-q 25 \
+#     --min-read-fraction 0.75 --sum-target $DADA2_TRUNC_SUM_TARGET \
+#     --out results/03_denoise/truncation_auto.tsv
 ```
 
 **What it runs: Deblur instead** (`DENOISER="deblur"`)
@@ -413,7 +458,8 @@ qiime feature-table tabulate-seqs --i-data results/03_denoise/rep_seqs.qza \
 ```
 
 **Outputs** (`results/03_denoise/`): `table.qza`, `rep_seqs.qza`, `denoising_stats.qzv`
-(or `deblur_stats.qzv`), `table_summary.qzv`, `rep_seqs.qzv`, `settings_used.tsv`.
+(or `deblur_stats.qzv`), `table_summary.qzv`, `rep_seqs.qzv`, `settings_used.tsv`; with
+automatic truncation also `truncation_auto.tsv`.
 
 **Check**
 - In `denoising_stats.qzv` (merged with the sample metadata `[gut_to_soil_tutorial]`),
@@ -978,8 +1024,9 @@ Report these in the methods section:
 | Component | How it was checked | Result |
 |---|---|---|
 | Every `qiime` command and parameter | Read against plugin source at tags 2026.1.0 / 2026.4.0 / 2026.7.0 (and 2024.5.0 where relevant) | Names, defaults and outputs match |
-| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on nine configurations (Illumina PE 16S DADA2 2026.7; the same on 2026.4; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. The stub rejects release-specific mistakes: `cutadapt trim-*` without `--o-stats` on 2026.7 (or with it before 2026.7), `ancombc2-visualizer` on 2026.7, and `da-barplot` on ANCOM-BC2 output before 2026.7. The previous pipeline version fails these checks in 6 of 9 configurations. |
+| Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on eleven configurations (Illumina PE 16S DADA2 2026.7; the same on 2026.4; automatic truncation under the 18S_PR2 preset; automatic truncation that must lengthen R to reach the overlap target; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. The stub rejects release-specific mistakes: `cutadapt trim-*` without `--o-stats` on 2026.7 (or with it before 2026.7), `ancombc2-visualizer` on 2026.7, and `da-barplot` on ANCOM-BC2 output before 2026.7. The previous pipeline version fails these checks in 6 of 9 configurations. |
 | First real-data run (2026.7, 18S V4, 216 samples) | Stages 1–2 on the user's server | Stage 1 completed. Stage 2 stopped: 2026.7 `cutadapt trim-paired` requires `--o-stats`. Fixed. A follow-up comparison of every plugin interface the pipeline calls (2026.4 vs 2026.7) found the stage 9 visualizer change too; also fixed. |
+| Automatic truncation (`auto_truncation.py`) | `tests/auto_truncation_test.sh`: 8 synthetic quality profiles with known answers (quality rule only; target already met; target forces lengthening; 2×250 reads that cannot reach the target; reads failing from position 1; stricter quality threshold), plus the decision table. Smoke test: chosen lengths reach DADA2 and the settings report; an unreachable target stops stage 3 before DADA2. Real data: the user's 2×301 18S V4 quality tables. | All pass. On the real tables the rule gives 282 / 250, the lengths chosen by hand for that run. |
 | Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
 | R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |
 | PR2 facts | RESCRIPt 2026.7.0 source (`get-pr2-data`, `dereplicate`); the PR2 5.1.1 taxonomy file (240,201 sequences) | 9 prefixed ranks; organelle tags `:plas :mito :apic :chro :nucl`; *Bacteriastrum* present |

@@ -36,7 +36,11 @@ BRANCHES=(
   'pr2_18S_preset|PRESET="18S_PR2"|CLASSIFIER=""'
   'pr2_user_override|PRESET="18S_PR2"|CLASSIFIER=""|MIN_SAMPLES=3|TAXA_COLLAPSE_LEVEL=7'
   'pr2_override_section|PRESET="18S_PR2"|CLASSIFIER=""|+override MIN_SAMPLES "2"'
+  'pr2_auto_trunc|PRESET="18S_PR2"|CLASSIFIER=""|DADA2_TRUNC_F=""|DADA2_TRUNC_R=""'
+  'auto_trunc_lengthen|DADA2_TRUNC_F="auto"|DADA2_TRUNC_R="auto"|DADA2_TRUNC_SUM_TARGET=520|DADA2_MAX_EE_R=3'
 )
+# quality profile the stub exports for 02_trim/reads_trimmed_summary.qzv (tests/make_seven_number.py)
+profile_for() { case "$1" in auto_trunc_lengthen) echo early_drop ;; *) echo 2x300 ;; esac; }
 STAGES=(01_import_qc 02_trim_primers 03_denoise 04_filter_features 05a_build_pr2_classifier
         05_taxonomy 06_filter_taxa_samples 07_phylogeny 08_diversity 09_composition_da
         10_export_provenance)
@@ -70,6 +74,7 @@ for spec in "${BRANCHES[@]}"; do
     done
     export SMOKE_LOG="$B/calls.log"; : > "$SMOKE_LOG"
     STUB_EPOCH="$(sed -n 's/^Q2_EPOCH="\(.*\)".*/\1/p' "$cfg")"; export STUB_EPOCH
+    STUB_QUALITY_PROFILE="$(profile_for "$name")"; export STUB_QUALITY_PROFILE
     result="OK"
     for s in "${STAGES[@]}"; do
         if ! (cd "$B" && bash "pipeline/${s}.sh") > "$B/${s}.log" 2>&1; then
@@ -115,6 +120,20 @@ for spec in "${BRANCHES[@]}"; do
                 setting_is 04_filter_features MIN_SAMPLES 2 "yours: override; preset 18S_PR2 would set '1'"
             expect "$name" "stage 04 filtered with --p-min-samples 2" grep -q -- '--p-min-samples 2 ' "$SMOKE_LOG"
             expect "$name" "rest of the preset still applied" setting_is 04_filter_features MIN_FREQ_FRACTION 0.001 "preset 18S_PR2" ;;
+        pr2_auto_trunc)
+            expect "$name" "preset sets auto; quality rule gives 282/250 (sum 532 >= 520)" \
+                grep -q -- '--p-trunc-len-f 282 --p-trunc-len-r 250 ' "$SMOKE_LOG"
+            expect "$name" "settings report shows the chosen lengths, marked auto" \
+                setting_is 03_denoise DADA2_TRUNC_R 250 "auto, chosen in truncation_auto.tsv; preset 18S_PR2"
+            expect "$name" "decision table written" grep -qx $'status\tok' "$B/results/03_denoise/truncation_auto.tsv"
+            expect "$name" "default expected-error filter 2/2" grep -q -- '--p-max-ee-f 2 --p-max-ee-r 2 ' "$SMOKE_LOG" ;;
+        auto_trunc_lengthen)
+            expect "$name" "reverse lengthened from 200 to 238 to reach F+R = 520" \
+                grep -q -- '--p-trunc-len-f 282 --p-trunc-len-r 238 ' "$SMOKE_LOG"
+            expect "$name" "DADA2_MAX_EE_R=3 passed to DADA2" grep -q -- '--p-max-ee-r 3 ' "$SMOKE_LOG"
+            expect "$name" "lengthening recorded" grep -qx $'reverse_reason\tlengthened for overlap' "$B/results/03_denoise/truncation_auto.tsv" ;;
+        illumina_single)
+            expect "$name" "single-end gets --p-max-ee" grep -q -- 'denoise-single .*--p-max-ee 2 ' "$SMOKE_LOG" ;;
         deblur18S_2026.1)
             expect "$name" "2026.1 visualizer, no seed flag" bash -c "grep -q 'ancombc2-visualizer' '$SMOKE_LOG' && ! grep -q random-seed '$SMOKE_LOG'" ;;
         pacbioITS)
@@ -131,6 +150,20 @@ elif grep -q 'TAXA_COLLAPSE_LEVEL=8 but TAXONOMY_RANKS lists only 7 ranks' "$B/o
     echo "PASS  collapse level beyond TAXONOMY_RANKS rejected with a clear message"
 else
     echo "FAIL  unexpected error: $(tail -2 "$B/out.log")"; status=1
+fi
+
+# ---- 4. Automatic truncation stops when the overlap target cannot be reached ----
+B="${WORK}/auto_unreachable"; mkdir -p "$B/raw_data"; cp -r "${REPO}/pipeline" "$B/"
+touch "$B/metadata.tsv" "$B/raw_data/a_S1_L001_R1_001.fastq.gz"
+sed -i 's|^PRESET=.*|PRESET="18S_PR2"|' "$B/pipeline/config.sh"
+export SMOKE_LOG="$B/calls.log" STUB_EPOCH=2026.7 STUB_QUALITY_PROFILE=2x250; : > "$SMOKE_LOG"
+if (cd "$B" && for s in 01_import_qc 02_trim_primers 03_denoise; do bash "pipeline/${s}.sh" || exit 1; done) > "$B/out.log" 2>&1; then
+    echo "FAIL  2x250 reads with the 520 target were not stopped"; status=1
+elif grep -q 'Overlap target not reachable: forward + reverse can reach at most 463 nt' "$B/out.log" \
+     && ! grep -q 'dada2 denoise-paired' "$SMOKE_LOG"; then
+    echo "PASS  unreachable overlap target stops stage 03 before DADA2, with a clear message"
+else
+    echo "FAIL  unexpected result: $(tail -3 "$B/out.log")"; status=1
 fi
 
 exit "$status"

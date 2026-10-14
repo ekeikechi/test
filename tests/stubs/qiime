@@ -31,6 +31,8 @@ if [[ "$1 $2" == "tools export" ]]; then
     done
     mkdir -p "$out"
     case "$in" in
+        *reads_trimmed_summary.qzv)   # per-position quality; profile from STUB_QUALITY_PROFILE
+            python3 "$(dirname "$0")/../make_seven_number.py" "$out" "${STUB_QUALITY_PROFILE:-2x300}" ;;
         *taxonomy*) touch "$out/taxonomy.tsv" ;;
         *rep_seqs*) touch "$out/dna-sequences.fasta" ;;
         *tree*)     touch "$out/tree.nwk" ;;

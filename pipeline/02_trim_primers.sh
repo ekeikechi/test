@@ -64,4 +64,4 @@ have "$D/reads_trimmed_summary.qzv" || run qiime demux summarize \
 
 log "CHECKPOINT: compare $D/reads_trimmed_summary.qzv with 01_import/reads_summary.qzv."
 log "Most reads should survive; a large loss usually means wrong primer sequences."
-log "Then set DADA2_TRUNC_F/R (or DEBLUR_TRIM_LENGTH) from the quality plot."
+log "Then set DADA2_TRUNC_F/R (or DEBLUR_TRIM_LENGTH) from the quality plot, or use DADA2_TRUNC_F/R=\"auto\"."
