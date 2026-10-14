@@ -82,7 +82,8 @@ conda create -n amplicon-r -c conda-forge -c bioconda r-base=4.5 bioconductor-ph
 ```
 project/
 ├── raw_data/            demultiplexed FASTQ(.gz)
-├── metadata.tsv         QIIME 2 metadata (first column = sample id; no personal data)
+├── metadata.tsv         QIIME 2 metadata (first column = sample id; no personal data). IDs only is
+│                        enough for stages 1–7; stages 8–11 need GROUP_COL and its column
 ├── manifest.tsv         only when IMPORT_MODE=manifest
 ├── pipeline/            config.sh, lib.sh, stage scripts 01_…10_ (+ optional 05a_)
 ├── R/downstream_analysis.R
@@ -684,6 +685,7 @@ qiime feature-table summarize --i-table results/06_filter_taxa_samples/table_tax
 qiime diversity alpha-rarefaction --i-table results/06_filter_taxa_samples/table_taxfilt.qza \
   --p-max-depth $MEDIAN --p-steps 20 --p-metrics observed_features shannon \
   --m-metadata-file $METADATA --o-visualization results/06_filter_taxa_samples/rarefaction_grouped.qzv
+# (grouped curves only when GROUP_COL is set and the metadata has a data column)
 qiime diversity alpha-rarefaction --i-table results/06_filter_taxa_samples/table_taxfilt.qza \
   --p-max-depth $MEDIAN --p-steps 20 --p-metrics observed_features shannon \
   --o-visualization results/06_filter_taxa_samples/rarefaction_per_sample.qzv
@@ -1025,7 +1027,7 @@ Report these in the methods section:
 |---|---|---|
 | Every `qiime` command and parameter | Read against plugin source at tags 2026.1.0 / 2026.4.0 / 2026.7.0 (and 2024.5.0 where relevant) | Names, defaults and outputs match |
 | Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on eleven configurations (Illumina PE 16S DADA2 2026.7; the same on 2026.4; automatic truncation under the 18S_PR2 preset; automatic truncation that must lengthen R to reach the overlap target; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. The stub rejects release-specific mistakes: `cutadapt trim-*` without `--o-stats` on 2026.7 (or with it before 2026.7), `ancombc2-visualizer` on 2026.7, and `da-barplot` on ANCOM-BC2 output before 2026.7. The previous pipeline version fails these checks in 6 of 9 configurations. |
-| First real-data run (2026.7, 18S V4, 216 samples) | Stages 1–2 on the user's server | Stage 1 completed. Stage 2 stopped: 2026.7 `cutadapt trim-paired` requires `--o-stats`. Fixed. A follow-up comparison of every plugin interface the pipeline calls (2026.4 vs 2026.7) found the stage 9 visualizer change too; also fixed. |
+| First real-data run (2026.7, 18S V4, 216 samples) | Stages 1–3 on the user's server | Stage 1 completed. Stage 2 stopped: 2026.7 `cutadapt trim-paired` requires `--o-stats`. Fixed. A follow-up comparison of every plugin interface the pipeline calls (2026.4 vs 2026.7) found the stage 9 visualizer change too; also fixed. Stage 3: DADA2 completed (13 min, 24 threads); the `feature-table summarize` after it failed ("list index out of range") because the metadata had sample IDs only, which 2026.7 `summarize` cannot handle. The pipeline now passes metadata to `summarize` only when it has a data column, and draws grouped rarefaction curves (stage 6, same limitation in `alpha-rarefaction`) only when `GROUP_COL` is set. The test stub reproduces both failures. |
 | Automatic truncation (`auto_truncation.py`) | `tests/auto_truncation_test.sh`: 8 synthetic quality profiles with known answers (quality rule only; target already met; target forces lengthening; 2×250 reads that cannot reach the target; reads failing from position 1; stricter quality threshold), plus the decision table. Smoke test: chosen lengths reach DADA2 and the settings report; an unreachable target stops stage 3 before DADA2. Real data: the user's 2×301 18S V4 quality tables. | All pass. On the real tables the rule gives 282 / 250, the lengths chosen by hand for that run. |
 | Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
 | R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |

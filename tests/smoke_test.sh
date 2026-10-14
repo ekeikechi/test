@@ -62,7 +62,10 @@ for spec in "${BRANCHES[@]}"; do
     name="${parts[0]}"; B="${WORK}/${name}"
     mkdir -p "$B/raw_data"
     cp -r "${REPO}/pipeline" "$B/"
-    touch "$B/metadata.tsv" "$B/manifest.tsv" "$B/raw_data/a_S1_L001_R1_001.fastq.gz"
+    touch "$B/manifest.tsv" "$B/raw_data/a_S1_L001_R1_001.fastq.gz"
+    # metadata with a group column, except one branch with IDs only (as at the start of a project)
+    if [[ "$name" == pr2_auto_trunc ]]; then printf 'sample-id\na\n' > "$B/metadata.tsv"
+    else printf 'sample-id\tgrp\na\tx\n' > "$B/metadata.tsv"; fi
     for f in clf ref sepp; do echo stub > "$B/$f.qza"; done
     cfg="$B/pipeline/config.sh"
     # answer every checkpoint, then apply the branch's own settings
@@ -92,6 +95,8 @@ for spec in "${BRANCHES[@]}"; do
             expect "$name" "collapse at level 6 (genus)" grep -q -- '--p-level 6 --o-collapsed-table .*table_da_genus.qza' "$SMOKE_LOG"
             expect "$name" "05a skipped (BUILD_PR2_CLASSIFIER=no)" bash -c "! grep -q 'rescript' '$SMOKE_LOG'"
             expect "$name" "settings handed to R" grep -qx $'collapse_level\t6' "$B/results/10_export/analysis_settings.tsv"
+            expect "$name" "metadata with columns: summarize and grouped curves use it" \
+                bash -c "grep -q 'feature-table summarize .*--m-metadata-file' '$SMOKE_LOG' && grep -q 'alpha-rarefaction .*--m-metadata-file' '$SMOKE_LOG'"
             expect "$name" "cutadapt --o-stats, tabulated and exported (2026.7)" \
                 bash -c "grep -q -- '--o-stats .*02_trim/cutadapt_stats.qza' '$SMOKE_LOG' && grep -q -- 'tools export --input-path .*cutadapt_stats.qza' '$SMOKE_LOG'"
             expect "$name" "da-barplot for ANCOM-BC2 (2026.7)" grep -q 'composition da-barplot' "$SMOKE_LOG" ;;
@@ -126,6 +131,10 @@ for spec in "${BRANCHES[@]}"; do
             expect "$name" "settings report shows the chosen lengths, marked auto" \
                 setting_is 03_denoise DADA2_TRUNC_R 250 "auto, chosen in truncation_auto.tsv; preset 18S_PR2"
             expect "$name" "decision table written" grep -qx $'status\tok' "$B/results/03_denoise/truncation_auto.tsv"
+            expect "$name" "ID-only metadata: summarize runs without it" \
+                bash -c "grep 'feature-table summarize' '$SMOKE_LOG' | grep -vq -- '--m-metadata-file'"
+            expect "$name" "ID-only metadata: grouped rarefaction curves skipped" \
+                bash -c "[[ \$(grep -c 'diversity alpha-rarefaction' '$SMOKE_LOG') == 1 ]] && ! grep -q 'alpha-rarefaction .*--m-metadata-file' '$SMOKE_LOG'"
             expect "$name" "default expected-error filter 2/2" grep -q -- '--p-max-ee-f 2 --p-max-ee-r 2 ' "$SMOKE_LOG" ;;
         auto_trunc_lengthen)
             expect "$name" "reverse lengthened from 200 to 238 to reach F+R = 520" \
@@ -154,7 +163,7 @@ fi
 
 # ---- 4. Automatic truncation stops when the overlap target cannot be reached ----
 B="${WORK}/auto_unreachable"; mkdir -p "$B/raw_data"; cp -r "${REPO}/pipeline" "$B/"
-touch "$B/metadata.tsv" "$B/raw_data/a_S1_L001_R1_001.fastq.gz"
+printf 'sample-id\na\n' > "$B/metadata.tsv"; touch "$B/raw_data/a_S1_L001_R1_001.fastq.gz"
 sed -i 's|^PRESET=.*|PRESET="18S_PR2"|' "$B/pipeline/config.sh"
 export SMOKE_LOG="$B/calls.log" STUB_EPOCH=2026.7 STUB_QUALITY_PROFILE=2x250; : > "$SMOKE_LOG"
 if (cd "$B" && for s in 01_import_qc 02_trim_primers 03_denoise; do bash "pipeline/${s}.sh" || exit 1; done) > "$B/out.log" 2>&1; then

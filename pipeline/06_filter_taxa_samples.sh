@@ -6,7 +6,7 @@
 source "$(dirname "$0")/lib.sh"
 D="${OUT}/06_filter_taxa_samples"; mkdir -p "$D"
 show_settings "$D" \
-    MARKER TAXA_EXCLUDE TAXA_INCLUDE MIN_SAMPLE_DEPTH
+    MARKER TAXA_EXCLUDE TAXA_INCLUDE MIN_SAMPLE_DEPTH GROUP_COL
 TABLE="${OUT}/04_filter_features/table.qza"
 SEQS="${OUT}/04_filter_features/rep_seqs.qza"
 TAX="${OUT}/05_taxonomy/taxonomy.qza"
@@ -32,12 +32,18 @@ if ! have "$D/rarefaction_per_sample.qzv"; then
     MEDIAN="$(depth_stat "$D/table_taxfilt.qza" "$D/table_taxfilt_biom" Median)"
     MEDIAN="${MEDIAN%.*}"
     log "Rarefaction curves up to the median depth (${MEDIAN})"
-    run qiime diversity alpha-rarefaction \
-        --i-table "$D/table_taxfilt.qza" \
-        --p-max-depth "$MEDIAN" --p-steps 20 \
-        --p-metrics observed_features shannon \
-        --m-metadata-file "$METADATA" \
-        --o-visualization "$D/rarefaction_grouped.qzv"
+    # Grouped curves need a categorical column; alpha-rarefaction fails on metadata
+    # without one ("All metadata filtered after dropping columns ...").
+    if [[ -n "$GROUP_COL" ]] && (( $(metadata_columns) > 0 )); then
+        run qiime diversity alpha-rarefaction \
+            --i-table "$D/table_taxfilt.qza" \
+            --p-max-depth "$MEDIAN" --p-steps 20 \
+            --p-metrics observed_features shannon \
+            --m-metadata-file "$METADATA" \
+            --o-visualization "$D/rarefaction_grouped.qzv"
+    else
+        log "No GROUP_COL or no metadata columns yet: drawing per-sample curves only."
+    fi
     run qiime diversity alpha-rarefaction \
         --i-table "$D/table_taxfilt.qza" \
         --p-max-depth "$MEDIAN" --p-steps 20 \

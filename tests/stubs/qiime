@@ -19,6 +19,15 @@ case "$1 $2" in
     "composition ancombc2-visualizer")
         # removed in q2-composition 2026.7
         ! ge 2026.7 || fail "No such command 'ancombc2-visualizer'." ;;
+    "feature-table summarize" | "diversity alpha-rarefaction")
+        # both fail on metadata without data columns (summarize 2026.7: "list index out
+        # of range"; alpha-rarefaction: "All metadata filtered after dropping columns")
+        for ((i = 0; i < ${#args[@]}; i++)); do
+            [[ ${args[i]} == --m-metadata-file ]] || continue
+            m=${args[i + 1]}
+            cols=$(awk -F'\t' '/^[[:space:]]*$/ {next} /^#/ && $1 !~ /^#(SampleID|Sample ID)$/ {next} {n = NF - 1; exit} END {print n + 0}' "$m")
+            [[ "$cols" -gt 0 ]] || fail "$1 $2 on metadata without data columns ($m)"
+        done ;;
     "composition da-barplot")
         # takes ANCOM-BC2 output (and --i-taxonomy) only from 2026.7
         ge 2026.7 || fail "da-barplot does not accept FeatureData[ANCOMBC2Output] before 2026.7." ;;
