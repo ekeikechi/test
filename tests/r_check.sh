@@ -8,6 +8,7 @@
 #      DA run at "Genus", empty multi-letter labels (dvs__) read as unassigned
 #   D  PR2 taxonomy but 7 configured ranks                       -> R must stop, not truncate
 #   E  read_taxonomy unit check: "sgr__", "dvs__", "g__" all become NA
+#   F  one metadata column with three groups                    -> all DA methods run
 # Usage: bash tests/r_check.sh WORKDIR     (WORKDIR must not exist yet; needs Rscript + packages)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -86,5 +87,14 @@ e_out="$(Rscript -e '
   "${REPO}/R/downstream_analysis.R" "$WORK/E_taxonomy.tsv")"
 [[ "$e_out" == "d__Eukaryota NA dv__X NA c__C1 NA NA NA NA" ]] && ok=yes || ok=no
 report "E empty-label regex" "$ok" "parsed: $e_out"
+
+# F: one metadata column, three groups (ANCOM-BC2 used to lose a single-column metadata)
+mkdir -p "$WORK/F"; Rscript "${REPO}/tests/make_synthetic.R" "$WORK/F" 16S >/dev/null
+awk -F'\t' -v OFS='\t' 'NR == 1 || /^#q2:/ { print $1, $2; next }
+    { n++; print $1, (n % 3 == 0 ? "a" : n % 3 == 1 ? "b" : "c") }' \
+    "$WORK/F/metadata.tsv" > "$WORK/F/metadata1.tsv" && mv "$WORK/F/metadata1.tsv" "$WORK/F/metadata.tsv"
+if run_r "$WORK/F" "$WORK/F_out" && [[ -s "$WORK/F_out/da_all_methods.csv" ]]; then
+    report "F 1 metadata column, 3 groups" yes "ran to completion: $(cut -d, -f4 "$WORK/F_out/da_all_methods.csv" | sort -u | grep -v method | tr -d '"' | tr '\n' ' ')"
+else report "F 1 metadata column, 3 groups" no "R failed: $(tail -3 "$WORK/F_out.log")"; fi
 
 exit "$status"

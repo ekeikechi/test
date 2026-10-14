@@ -6,7 +6,7 @@ source "$(dirname "$0")/lib.sh"
 D="${OUT}/10_export"; mkdir -p "$D"
 show_settings "$D" \
     TAXONOMY_RANKS TAXA_COLLAPSE_LEVEL OVERVIEW_RANK_LEVEL SAMPLING_DEPTH GROUP_COL \
-    DA_REFERENCE RANDOM_SEED
+    DA_REFERENCE RANDOM_SEED SAMPLE_HABITAT TRAIT_MIN_AGREEMENT BUILD_PR2_CLASSIFIER PR2_VERSION
 TABLE="${OUT}/06_filter_taxa_samples/table_final.qza"
 SEQS="${OUT}/06_filter_taxa_samples/rep_seqs_final.qza"
 TAX="${OUT}/05_taxonomy/taxonomy.qza"
@@ -67,6 +67,10 @@ DEPTH="$(awk -F'\t' 'NR > 1 { sub(/;[[:space:]]*$/, "", $2); n = split($2, a, ";
     printf 'group_col\t%s\n'        "$GROUP_COL"
     printf 'da_reference\t%s\n'     "$DA_REFERENCE"
     printf 'random_seed\t%s\n'      "$RANDOM_SEED"
+    # read by R/pr2_traits.R
+    printf 'sample_habitat\t%s\n'      "$SAMPLE_HABITAT"
+    printf 'trait_min_agreement\t%s\n' "$TRAIT_MIN_AGREEMENT"
+    printf 'pr2_version\t%s\n'         "$([[ "$BUILD_PR2_CLASSIFIER" == yes ]] && echo "$PR2_VERSION")"
 } > "$D/analysis_settings.tsv"
 
 log "Provenance: a re-runnable script and a methods supplement (citations + script)"
@@ -78,3 +82,6 @@ have "$D/reproducibility_supplement.zip" || run qiime tools replay-supplement \
     --out-fp "$D/reproducibility_supplement.zip"
 
 log "Done. R inputs are in $D (feature-table.tsv, taxonomy.tsv, metadata.tsv, tree.nwk)."
+if [[ "$BUILD_PR2_CLASSIFIER" == yes ]]; then
+    log "PR2 traits next: Rscript R/pr2_traits.R $D ${OUT}/11_traits"
+fi

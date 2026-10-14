@@ -147,6 +147,14 @@ RUN_KMER_DIVERSITY="no"                   # yes = also run tree-free kmer-divers
 # used by QIIME 2 (taxa collapse) and R alike. 6 = Genus for the 7 ranks above.
 TAXA_COLLAPSE_LEVEL=6
 
+# ---- 11 PR2 traits (R/pr2_traits.R; PR2 classifier only) --------------------------
+# Habitat of your samples, for the WoRMS habitat check: marine | brackish | freshwater |
+# terrestrial | "" (no check). Marine and brackish count as each other.
+SAMPLE_HABITAT=""
+# A trait is given to an ASV when at least this share of the PR2 species under its
+# assigned taxon agree; otherwise "mixed".
+TRAIT_MIN_AGREEMENT=0.9
+
 # =============================================================================
 # Preset block. Format:  preset VARIABLE "value shipped above" "preset value"
 # The middle argument must match the value shipped above (tests/smoke_test.sh checks

@@ -271,7 +271,12 @@ for (nm in names(dists)) {
     R2 = perm$R2[seq_len(nrow(perm) - 2)], p = perm$`Pr(>F)`[seq_len(nrow(perm) - 2)],
     group_dispersion_p = disp$tab$`Pr(>F)`[1])  # PERMDISP on `group`, same for every term
 
-  pc <- cmdscale(d, k = 2, eig = TRUE)
+  pc <- suppressWarnings(cmdscale(d, k = 2, eig = TRUE))
+  if (is.null(dim(pc$points)) || ncol(pc$points) < 2) {
+    # e.g. every sample identical under this distance (common in small subsets)
+    say("PCoA of %s skipped: fewer than 2 positive eigenvalues.", nm)
+    next
+  }
   var_expl <- round(100 * pc$eig[1:2] / sum(pc$eig[pc$eig > 0]), 1)
   pts <- data.frame(PC1 = pc$points[, 1], PC2 = pc$points[, 2], md, check.names = FALSE)
   p <- ggplot(pts, aes(PC1, PC2, colour = .data[[cfg$group]])) +
@@ -371,8 +376,11 @@ if (requireNamespace("maaslin3", quietly = TRUE)) {
 # ANCOM-BC2 (bias-corrected log-linear model) [gut_to_soil_tutorial]
 if (requireNamespace("ANCOMBC", quietly = TRUE)) {
   # Matrix input (with meta_data) avoids the extra `microbiome` dependency of phyloseq input.
+  # ANCOMBC2 drops to a vector when the metadata has a single column and then cannot find
+  # the group variable; an ID column keeps it a data frame.
+  meta_ab <- cbind(meta_da, .sample_id = rownames(meta_da))
   ab <- ANCOMBC::ancombc2(
-    data = counts_da, taxa_are_rows = TRUE, meta_data = meta_da,
+    data = counts_da, taxa_are_rows = TRUE, meta_data = meta_ab,
     fix_formula = paste(c(cfg$group, cfg$covariates), collapse = " + "),
     p_adj_method = "BH", prv_cut = 0, lib_cut = 0, group = cfg$group,
     struc_zero = FALSE, neg_lb = FALSE, alpha = cfg$da_q, pseudo_sens = TRUE,

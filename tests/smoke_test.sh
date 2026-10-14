@@ -95,6 +95,7 @@ for spec in "${BRANCHES[@]}"; do
             expect "$name" "collapse at level 6 (genus)" grep -q -- '--p-level 6 --o-collapsed-table .*table_da_genus.qza' "$SMOKE_LOG"
             expect "$name" "05a skipped (BUILD_PR2_CLASSIFIER=no)" bash -c "! grep -q 'rescript' '$SMOKE_LOG'"
             expect "$name" "settings handed to R" grep -qx $'collapse_level\t6' "$B/results/10_export/analysis_settings.tsv"
+            expect "$name" "no PR2 version without a PR2 classifier" grep -qx $'pr2_version\t' "$B/results/10_export/analysis_settings.tsv"
             expect "$name" "metadata with columns: summarize and grouped curves use it" \
                 bash -c "grep -q 'feature-table summarize .*--m-metadata-file' '$SMOKE_LOG' && grep -q 'alpha-rarefaction .*--m-metadata-file' '$SMOKE_LOG'"
             expect "$name" "cutadapt --o-stats, tabulated and exported (2026.7)" \
@@ -115,6 +116,8 @@ for spec in "${BRANCHES[@]}"; do
             expect "$name" "no tree; non-phylogenetic diversity" bash -c "! grep -q -- '--i-phylogeny\|fragment-insertion\|align-to-tree' '$SMOKE_LOG'"
             expect "$name" "kmer diversity on" grep -q 'boots kmer-diversity' "$SMOKE_LOG"
             expect "$name" "collapse at level 8 (genus of 9 PR2 ranks)" grep -q -- '--p-level 8 --o-collapsed-table .*table_da_genus.qza' "$SMOKE_LOG"
+            expect "$name" "R/pr2_traits.R gets the classifier's PR2 version" \
+                grep -qx $'pr2_version\t5.1.1' "$B/results/10_export/analysis_settings.tsv"
             expect "$name" "R gets 9 ranks + level 8" bash -c "grep -qx \$'taxonomy_ranks\tDomain Supergroup Division Subdivision Class Order Family Genus Species' '$B/results/10_export/analysis_settings.tsv' && grep -qx \$'collapse_level\t8' '$B/results/10_export/analysis_settings.tsv'" ;;
         pr2_user_override)
             expect "$name" "your MIN_SAMPLES=3 kept and labelled" setting_is 04_filter_features MIN_SAMPLES 3 "yours; preset 18S_PR2 would set '1'"

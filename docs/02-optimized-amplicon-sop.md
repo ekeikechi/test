@@ -31,6 +31,7 @@ explains the decisions; the scripts carry them out.
 | D13 | ANCOM-BC2 in QIIME 2 (ASV and the `TAXA_COLLAPSE_LEVEL` rank, genus by default); R consensus of ANCOM-BC2 + ALDEx2 + MaAsLin3 | `gut_to_soil_tutorial`, `MH_2026.3-R` | Current QIIME 2 method plus MH's multi-tool practice, with the same input to every tool. |
 | D14 | Export for R plus `replay-provenance` and `replay-supplement` | `MH_*`, `gut_to_soil_tutorial` | Portable data plus an exact methods record. |
 | D15 | DADA2 truncation chosen by hand from the quality plot, or **`auto`**: cut before the first position with median quality < 25 (or where < 75% of reads are that long), then lengthen the better read until F+R reaches the overlap target | Quality rule: nf-core/ampliseq (not one of the eight sources). Overlap target: PR2 V4 insert lengths, measured for this SOP | Reproducible, logged choice; the overlap target stops long-insert taxa from vanishing at merging without an error. |
+| D16 | PR2 traits for every ASV (18S + PR2 only): ecological function, mixoplankton type, HAB, WoRMS habitat, WoRMS/GBIF ids, source evidence and SILVA/UniEuk cross-names, taken from the PR2 species under the ASV's assigned taxon when ≥ 90% agree; a cited override list; land plants reported apart; a photosynthesis category | PR2 5.1.1 database (Sommeria-Klein et al. 2021; Mitra et al. 2023; WoRMS) — not one of the eight sources | Uses all of PR2's functional data with its provenance shown, and fixes the lineage-level errors that matter for photosynthetic protists |
 
 These are the generic (Illumina 16S) defaults. `PRESET="18S_PR2"` (§2.1) changes:
 - **D4:** 18S V4 primers.
@@ -70,11 +71,12 @@ conda create -n readqc -c conda-forge -c bioconda fastqc multiqc
 ```
 
 **R** (stage 11): R ≥ 4.3 with `phyloseq`, `vegan`, `ggplot2`, `dplyr`, `tidyr`, `ALDEx2`,
-`maaslin3`, `ANCOMBC`, `ape`. For example:
+`maaslin3`, `ANCOMBC`, `ape`, plus `qs` for the PR2 trait step (11a). For example:
 
 ```bash
 conda create -n amplicon-r -c conda-forge -c bioconda r-base=4.5 bioconductor-phyloseq r-vegan \
-  r-ggplot2 r-dplyr r-tidyr bioconductor-aldex2 bioconductor-maaslin3 bioconductor-ancombc r-ape
+  r-ggplot2 r-dplyr r-tidyr bioconductor-aldex2 bioconductor-maaslin3 bioconductor-ancombc r-ape r-qs
+# existing environment: conda install -n amplicon-r -c conda-forge r-qs
 ```
 
 ## 2. Project layout and how to run
@@ -1004,6 +1006,81 @@ described above.
   depth and reference group.
 - `da_consensus.csv` lists the taxa found by at least 2 methods with the same direction.
 
+### 11a. PR2 traits (`R/pr2_traits.R`; 18S with the PR2 classifier)
+
+Run it after stage 10, before or alongside the main R analysis. It downloads the full PR2
+database once (`pr2.qs`, about 160 MB, from the `pr2database` R package's data store;
+needs the R package `qs`) and annotates every ASV. Settings come from `config.sh` via
+`analysis_settings.tsv`: `SAMPLE_HABITAT` (marine | brackish | freshwater | terrestrial |
+empty) and `TRAIT_MIN_AGREEMENT` (0.9).
+
+**How an ASV gets its traits.** PR2's traits are recorded per species. An ASV takes the
+PR2 species under its deepest assigned taxon (matched on the whole lineage; if that taxon
+is not in PR2's taxonomy table, the next rank up). A categorical trait is assigned when
+≥ `TRAIT_MIN_AGREEMENT` of those species share one value, otherwise `mixed`. In PR2 5.1.1,
+`ecological_function` agrees within 98.5% of classes, 99.5% of orders and all genera, so
+ASVs classified to class or deeper almost always get a value. Each row reports the rank
+used (`trait_rank`), the number of species and the agreement.
+
+| Column(s) | Source in PR2 | Meaning |
+|---|---|---|
+| `ecological_function` | Sommeria-Klein et al. 2021 | phototrophs, phagotrophs, parasites, metazoans, dinoflagellates (one class for the whole group), osmotrophs (override only) |
+| `mixoplankton` | Mitra et al. 2023 (Mixoplankton Database) | CM constitutive; GNCM, pSNCM plastid-stealing; eSNCM endosymbiont-bearing; `not_listed` otherwise. Mostly marine, species-level |
+| `HAB`, `HAB_species` | WoRMS / IOC-UNESCO HAB list | "HAB species" (species-level ASV) or "taxon contains N HAB species" |
+| `worms_marine/brackish/freshwater/terrestrial` | WoRMS | "k of n": k of the n species with WoRMS habitat data occur in that habitat |
+| `habitat_flag` | WoRMS | With `SAMPLE_HABITAT` set: taxon has habitat data for ≥ 3 species, none in the sample habitat (marine and brackish count as each other). A prompt to check the assignment, not a filter |
+| `worms_id`, `gbif_id` | PR2 | Species-level ASVs only; keys for WoRMS/GBIF trait and occurrence data |
+| `ev_*` | PR2 sequence records | Evidence about the reference sequences, not traits: biotic relationship, hosts, biome/material, habitat keyword classes (marine, brackish, freshwater, soil, sediment, host; keyword list in the script), share from cultures, geography. Sparse and biased to well-sampled habitats |
+| `silva_consensus`, `unieuk_consensus` | PR2 cross-annotation | Majority-rule name of the same reference sequences in SILVA and EukRibo/UniEuk |
+| `overrides_applied` | `R/pr2_trait_overrides.tsv` | Which corrections touched the taxon |
+
+**Overrides** (`R/pr2_trait_overrides.tsv`, editable; each row has a reason and a
+reference). Checked against PR2 5.1.1, which labels these by lineage: colourless
+*Paraphysomonas*, *Oikomonas*, *Poteriospumella*, *Goniomonas*, *Hemiarma* →
+phagotrophs; *Chilomonas*, *Polytoma*, *Polytomella*, *Prototheca* → osmotrophs;
+*Helicosporidium* → parasites; photosynthetic *Chromera*, *Vitrella* and the
+chromatophore-bearing *Paulinella* species → phototrophs. Rows marked "verify" cite
+general knowledge only.
+
+**`photo_category`** (one value per ASV, in this order):
+
+| Category | Rule |
+|---|---|
+| `plant` | class Embryophyceae (land plants: roots, pollen, detritus); reported apart |
+| `acquired_phototrophy` | mixoplankton pSNCM, GNCM or eSNCM |
+| `phototroph` | ecological_function phototrophs, or mixoplankton CM (own plastids) |
+| `dinoflagellate_unresolved` | dinoflagellates not flagged CM: trophic mode not resolvable from 18S |
+| `non_photosynthetic` | phagotrophs, parasites, metazoans, osmotrophs |
+| `mixed_or_unknown` | species under the taxon disagree, or no PR2 trait data |
+| `unassigned` | ASV not classified |
+
+**Limits.** Traits are inherited from the assigned taxon, not measured: an ASV classified
+to genus gets the genus summary, and 18S presence says nothing about whether a cell was
+photosynthesising. PR2's trait data are mostly marine. The trait data are always the
+current PR2 release; the script warns if it differs from the classifier's `PR2_VERSION`.
+
+**Run** (in the R environment from §1)
+
+```bash
+Rscript R/pr2_traits.R results/10_export results/11_traits
+# optional third argument: a local pr2.qs (or .rds) instead of downloading
+# then, the full analysis on phototrophs only:
+Rscript R/downstream_analysis.R results/11_traits/export_phototroph results/11_R_phototroph
+```
+
+**Outputs** (`results/11_traits/`): `asv_traits.tsv` (one row per ASV, all columns above
+plus `total_count`), `table_by_photo_category.tsv` and `table_by_ecological_function.tsv`
+(reads per sample; `_relative` versions), `trait_summary.tsv` (ASVs and reads per
+category), `traits_settings.tsv` (PR2 version, overrides file, thresholds),
+`photo_category_by_sample.pdf`, `phototroph_share_by_group.pdf` (with `GROUP_COL`),
+`export_phototroph/` (stage 10-style export of `phototroph` ASVs), `pr2.qs` (cached).
+
+**Check**
+- `trait_summary.tsv`: a large `mixed_or_unknown` share means many ASVs stop at high
+  ranks; a large `plant` share in sediment usually means plant detritus.
+- Read every `habitat_flag` row: the taxon may be misassigned, or WoRMS may lack records.
+- `overrides_applied`: confirm the corrections suit your system, and add your own rows.
+
 ---
 
 ## 12. Reporting checklist
@@ -1029,6 +1106,8 @@ Report these in the methods section:
 | Bash control flow (all 11 stages) | `shellcheck` (clean) plus `tests/smoke_test.sh`: dry runs with stub `qiime`/`biom` commands on eleven configurations (Illumina PE 16S DADA2 2026.7; the same on 2026.4; automatic truncation under the 18S_PR2 preset; automatic truncation that must lengthen R to reach the overlap target; Deblur 18S 2026.1; PacBio ITS + kmer; Illumina single-end; no primers; **18S_PR2 preset**; **preset with your own edits**; **preset with the overrides section**), with assertions on the commands issued and the settings reports. Run under **bash 5.2 and bash 4.3.48**. | All configurations pass on both bash versions. Before the empty-array fix, all five original configurations failed on bash 4.3. The stub rejects release-specific mistakes: `cutadapt trim-*` without `--o-stats` on 2026.7 (or with it before 2026.7), `ancombc2-visualizer` on 2026.7, and `da-barplot` on ANCOM-BC2 output before 2026.7. The previous pipeline version fails these checks in 6 of 9 configurations. |
 | First real-data run (2026.7, 18S V4, 216 samples) | Stages 1–3 on the user's server | Stage 1 completed. Stage 2 stopped: 2026.7 `cutadapt trim-paired` requires `--o-stats`. Fixed. A follow-up comparison of every plugin interface the pipeline calls (2026.4 vs 2026.7) found the stage 9 visualizer change too; also fixed. Stage 3: DADA2 completed (13 min, 24 threads); the `feature-table summarize` after it failed ("list index out of range") because the metadata had sample IDs only, which 2026.7 `summarize` cannot handle. The pipeline now passes metadata to `summarize` only when it has a data column, and draws grouped rarefaction curves (stage 6, same limitation in `alpha-rarefaction`) only when `GROUP_COL` is set. The test stub reproduces both failures. |
 | Automatic truncation (`auto_truncation.py`) | `tests/auto_truncation_test.sh`: 8 synthetic quality profiles with known answers (quality rule only; target already met; target forces lengthening; 2×250 reads that cannot reach the target; reads failing from position 1; stricter quality threshold), plus the decision table. Smoke test: chosen lengths reach DADA2 and the settings report; an unreachable target stops stage 3 before DADA2. Real data: the user's 2×301 18S V4 quality tables. | All pass. On the real tables the rule gives 282 / 250, the lengths chosen by hand for that run. |
+| PR2 traits (`R/pr2_traits.R`) | `tests/traits_check.sh`: synthetic PR2 database with 14 ASVs of known answer (every photo_category, an override, a class-level mixed taxon, a lineage missing from PR2 that falls back to supergroup, HAB at species and genus level, the habitat flag and its 3-species minimum, evidence columns, majority-rule SILVA name, phototroph-only export, read totals, version-mismatch warning): 28 checks. Real PR2 5.1.1: 317 pseudo-ASVs built from real lineages, then `downstream_analysis.R` on the phototroph-only export. | All pass. The real run took about 30 s; known taxa came out as expected (e.g. *Navicula*, *Gyrosigma* phototroph; *Paraphysomonas*, *Goniomonas* non-photosynthetic after override; *Chromera* phototroph after override; *Mallomonas* flagged as freshwater-only). |
+| Stage 11 robustness | `tests/r_check.sh` scenario F: one metadata column, three groups. | Found and fixed: ANCOM-BC2 lost the group variable when the metadata had a single column (the previous script fails F with "variables … not in the meta data"). PCoA is now skipped with a message, instead of crashing, when a distance has fewer than two positive eigenvalues (e.g. a small subset in which every sample is identical by Jaccard). |
 | Preset mechanism | Smoke test checks that every preset line's "shipped" value matches `config.sh`, that preset values are applied, and that values you set yourself are kept and labelled | Pass |
 | R script | `tests/r_check.sh` (R 4.5, phyloseq 1.54, vegan 2.7.5, ALDEx2 1.42, maaslin3 1.2, ANCOMBC 2.14) on synthetic data with **6 known enriched genera**: 16S defaults; reference = the alphabetically second group; PR2 9 ranks at level 8; PR2 taxonomy with too few configured ranks (must stop); and a unit check of the empty-label rule | All five pass. Before the fix, the alphabetically-second reference lost all 6 true genera and the old empty-label rule left `sgr__`/`dvs__` as taxon names. |
 | PR2 facts | RESCRIPt 2026.7.0 source (`get-pr2-data`, `dereplicate`); the PR2 5.1.1 taxonomy file (240,201 sequences) | 9 prefixed ranks; organelle tags `:plas :mito :apic :chro :nucl`; *Bacteriastrum* present |
