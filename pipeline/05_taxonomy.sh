@@ -27,9 +27,12 @@ have "$D/taxonomy.qza" || run qiime feature-classifier classify-sklearn \
     --o-classification "$D/taxonomy.qza"
 
 # One table with sequence, taxonomy, frequency and BLAST links, for spot checks.
+# --i-taxonomy takes "label:file"; the label must be a Python identifier, so
+# "PR2_5.1.1" is passed as "PR2_5_1_1".
+TAX_KEY="$(printf '%s' "${CLASSIFIER_LABEL:-taxonomy}" | sed -e 's/[^A-Za-z0-9_]/_/g' -e 's/^\([0-9]\)/_\1/')"
 have "$D/rep_seqs_taxonomy.qzv" || run qiime feature-table tabulate-seqs \
     --i-data "$SEQS" \
-    --i-taxonomy "${CLASSIFIER_LABEL}:$D/taxonomy.qza" \
+    --i-taxonomy "${TAX_KEY:-taxonomy}:$D/taxonomy.qza" \
     --m-metadata-file "${OUT}/04_filter_features/table_feature_frequencies.qza" \
     --o-visualization "$D/rep_seqs_taxonomy.qzv"
 

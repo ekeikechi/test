@@ -110,6 +110,7 @@ for spec in "${BRANCHES[@]}"; do
             expect "$name" "PR2 classifier built (get-pr2-data, dereplicate --p-rank-handles disable, fit)" \
                 bash -c "grep -q 'rescript get-pr2-data --p-version 5.1.1' '$SMOKE_LOG' && grep -q -- '--p-rank-handles disable' '$SMOKE_LOG' && grep -q 'fit-classifier-naive-bayes' '$SMOKE_LOG'"
             expect "$name" "stage 05 used the built PR2 classifier" grep -q -- '--i-classifier .*05a_pr2_classifier/pr2_5.1.1_classifier.qza' "$SMOKE_LOG"
+            expect "$name" "tabulate-seqs label PR2_5.1.1 passed as identifier PR2_5_1_1" grep -q -- '--i-taxonomy PR2_5_1_1:' "$SMOKE_LOG"
             expect "$name" "18S V4 primers" grep -q -- '--p-front-f CYGCGGTAATTCCAGCTC --p-front-r AYGGTATCTRATCRTCTTYG' "$SMOKE_LOG"
             expect "$name" "DADA2 pseudo-pooling" grep -q -- '--p-pooling-method pseudo' "$SMOKE_LOG"
             expect "$name" "MIN_SAMPLES=1 from preset" setting_is 04_filter_features MIN_SAMPLES 1 "preset 18S_PR2"

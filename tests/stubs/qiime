@@ -28,6 +28,14 @@ case "$1 $2" in
             cols=$(awk -F'\t' '/^[[:space:]]*$/ {next} /^#/ && $1 !~ /^#(SampleID|Sample ID)$/ {next} {n = NF - 1; exit} END {print n + 0}' "$m")
             [[ "$cols" -gt 0 ]] || fail "$1 $2 on metadata without data columns ($m)"
         done ;;
+    "feature-table tabulate-seqs")
+        # --i-taxonomy is a collection: "KEY:path" keys must be Python identifiers
+        # (q2cli: "All keys must be valid Python identifiers"), so "PR2_5.1.1" fails
+        for ((i = 0; i < ${#args[@]}; i++)); do
+            [[ ${args[i]} == --i-taxonomy && ${args[i + 1]} == *:* ]] || continue
+            [[ ${args[i + 1]%%:*} =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] \
+                || fail "All keys must be valid Python identifiers (${args[i + 1]%%:*})"
+        done ;;
     "composition da-barplot")
         # takes ANCOM-BC2 output (and --i-taxonomy) only from 2026.7
         ge 2026.7 || fail "da-barplot does not accept FeatureData[ANCOMBC2Output] before 2026.7." ;;
